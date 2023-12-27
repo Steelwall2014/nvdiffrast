@@ -9,6 +9,7 @@
 #include "torch_common.inl"
 #include "torch_types.h"
 #include <tuple>
+#include <pybind11/stl_bind.h>
 
 //------------------------------------------------------------------------
 // Op prototypes. Return type macros for readability.
@@ -44,15 +45,18 @@ OP_RETURN_TTTTV     texture_grad_linear_mipmap_linear   (torch::Tensor tex, torc
 TopologyHashWrapper antialias_construct_topology_hash   (torch::Tensor tri);
 OP_RETURN_TT        antialias_fwd                       (torch::Tensor color, torch::Tensor rast, torch::Tensor pos, torch::Tensor tri, TopologyHashWrapper topology_hash);
 OP_RETURN_TT        antialias_grad                      (torch::Tensor color, torch::Tensor rast, torch::Tensor pos, torch::Tensor tri, torch::Tensor dy, torch::Tensor work_buffer);
-OP_RETURN_V         virtual_texture_feedback            (torch::Tensor uv, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
-OP_RETURN_V         virtual_texture_feedback_mip        (torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
-OP_RETURN_T         virtual_texture_fwd                 (torch::Tensor uv, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
-OP_RETURN_T         virtual_texture_fwd_mip             (torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
-OP_RETURN_V         virtual_texture_grad_nearest        (torch::Tensor uv, torch::Tensor dy, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
-OP_RETURN_VT        virtual_texture_grad_linear         (torch::Tensor uv, torch::Tensor dy, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
-OP_RETURN_WT        virtual_texture_grad_linear_mipmap_nearest  (torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
-OP_RETURN_WTTT      virtual_texture_grad_linear_mipmap_linear   (torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
+OP_RETURN_V         virtual_texture_feedback            (torch::Tensor uv, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
+OP_RETURN_V         virtual_texture_feedback_mip        (torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
+OP_RETURN_T         virtual_texture_fwd                 (torch::Tensor uv, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
+OP_RETURN_T         virtual_texture_fwd_mip             (torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mask, torch::Tensor mip_level_bias, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
+OP_RETURN_V         virtual_texture_grad_nearest        (torch::Tensor uv, torch::Tensor dy, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
+OP_RETURN_VT        virtual_texture_grad_linear         (torch::Tensor uv, torch::Tensor dy, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
+OP_RETURN_WT        virtual_texture_grad_linear_mipmap_nearest  (torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
+OP_RETURN_WTTT      virtual_texture_grad_linear_mipmap_linear   (torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
 OP_RETURN_W         virtual_texture_construct_mip               (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
+torch::Tensor       virtual_geometry_frustum_cull               (torch::Tensor AABBs, torch::Tensor Frustums);
+void                virtual_geometry_accumulate_grad            (std::vector<torch::Tensor> Attribute, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices);
+VirtualGeometryConstructResult virtual_geometry_construct       (torch::Tensor Positions, torch::Tensor Indices, int MaxPartitionSize, std::vector<torch::Tensor> Attributes);
 //------------------------------------------------------------------------
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -60,6 +64,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     pybind11::class_<RasterizeCRStateWrapper>(m, "RasterizeCRStateWrapper").def(pybind11::init<int>());
     pybind11::class_<TextureMipWrapper>(m, "TextureMipWrapper").def(pybind11::init<>());
     pybind11::class_<TopologyHashWrapper>(m, "TopologyHashWrapper");
+    pybind11::class_<VirtualGeometryCluster>(m, "VirtualGeometryCluster")
+        .def_readwrite("ClusterIndex", &VirtualGeometryCluster::ClusterIndex)
+        .def_readwrite("Positions", &VirtualGeometryCluster::Positions)
+        .def_readwrite("Attributes", &VirtualGeometryCluster::Attributes)
+        .def_readwrite("Indices", &VirtualGeometryCluster::Indices)
+        .def_readwrite("OldTriangleIndices", &VirtualGeometryCluster::OldTriangleIndices);
+    pybind11::class_<VirtualGeometryConstructResult>(m, "VirtualGeometryConstructResult")
+        .def_readwrite("Clusters", &VirtualGeometryConstructResult::Clusters)
+        .def_readwrite("MatchingVertices", &VirtualGeometryConstructResult::MatchingVertices);
 
     // Plumbing to torch/c10 logging system.
     m.def("get_log_level", [](void)     { return FLAGS_caffe2_log_level;  }, "get log level");
@@ -91,7 +104,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("virtual_texture_grad_linear",                &virtual_texture_grad_linear,                   "virtual texture gradient op in linear mode");
     m.def("virtual_texture_grad_linear_mipmap_nearest", &virtual_texture_grad_linear_mipmap_nearest,    "virtual texture gradient op in linear-mipmap-nearest mode");
     m.def("virtual_texture_grad_linear_mipmap_linear",  &virtual_texture_grad_linear_mipmap_linear,     "virtual texture gradient op in linear-mipmap-linear mode");
-    m.def("virtual_texture_construct_mip",  &virtual_texture_construct_mip,     "virtual texture mipmap construction");
+    m.def("virtual_texture_construct_mip",              &virtual_texture_construct_mip,     "virtual texture mipmap construction");
+    m.def("virtual_geometry_construct",                 &virtual_geometry_construct,        "virtual geometry construction");
+    m.def("virtual_geometry_frustum_cull",              &virtual_geometry_frustum_cull,     "virtual geometry frustum cull");
+    m.def("virtual_geometry_accumulate_grad",           &virtual_geometry_accumulate_grad,  "virtual geometry accumulate gradients");
     
 }
 

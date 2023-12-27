@@ -63,3 +63,21 @@ public:
 };
 
 //------------------------------------------------------------------------
+// Virtual geometry cluster wrapper
+
+class VirtualGeometryCluster
+{
+public:
+    int32_t                     ClusterIndex;
+    torch::Tensor               Positions;
+    torch::Tensor               Indices;
+    std::vector<torch::Tensor>  Attributes;
+    torch::Tensor               OldTriangleIndices;
+};
+
+class VirtualGeometryConstructResult
+{
+public:
+    std::vector<VirtualGeometryCluster>                 Clusters;
+    std::vector<std::vector<std::tuple<int, int>>>      MatchingVertices;
+};

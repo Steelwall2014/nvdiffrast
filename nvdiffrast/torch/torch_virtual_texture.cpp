@@ -5,6 +5,7 @@
 #include "../common/virtual_texture.h"
 #include <cuda_runtime.h>
 #include <torch/extension.h>
+#include <type_traits>
 
 //------------------------------------------------------------------------
 // Kernel prototypes.
@@ -60,12 +61,6 @@ void VirtualTextureMipGradKernel4                           (const VirtualTextur
 
 int calculateMaxMipLevel(int width, int height, int mipLevelLimit)
 {
-    // If max_mip_level is equal to -1, it means we should decide maximum mipmap level by ourselves.
-    // Then make max_mip_level big enough to ignore this value.
-    // if (max_mip_level == -1)
-    //     max_mip_level = 0x7fffffff;
-    // max_mip_level = std::min((int)std::log2(std::min(height, width)), max_mip_level);
-    // return max_mip_level;
 
     if (mipLevelLimit == 0)
         return 0;
@@ -117,7 +112,7 @@ static void set_modes(VirtualTextureKernelParams& p, int filter_mode, int bounda
 //------------------------------------------------------------------------
 // Virtual texture feedback op.
 
-std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages)
+std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages)
 {
     NVDR_CHECK(texture_height>0 && (texture_height & (texture_height-1))==0, "virtual_texture_feedback_mip: Texture height must be power of two.");
     NVDR_CHECK(texture_width>0 && (texture_width & (texture_width-1))==0, "virtual_texture_feedback_mip: Texture width must be power of two.");
@@ -130,6 +125,9 @@ std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch:
     int max_mip_level = pages.size()-1;//calculateMaxMipLevel(texture_width, texture_height, -1);
     set_modes(p, filter_mode, boundary_mode, max_mip_level);
     p.mipLevelMax = max_mip_level;
+
+    bool has_mask = mask.defined() && mask.nbytes();
+    p.mask = has_mask ? mask.data_ptr<bool>() : NULL;
 
     // See if we have these tensors or not.
     bool has_uv_da = uv_da.defined() && uv_da.nbytes();
@@ -189,15 +187,12 @@ std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch:
     std::vector<torch::Tensor> Out(max_mip_level+1);
     for (int mip = 0; mip <= max_mip_level; mip++)
     {
-        // int2 sz = calcMipLevelSize(texture_width, texture_height, mip);
-        // int page_num_y = calcPageNum(sz.y, page_size_y);
-        // int page_num_x = calcPageNum(sz.x, page_size_x);
         int numPages = pages[mip].size();
         // Allocate output tensor.
-        torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCUDA);
+        torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kBool).device(torch::kCUDA);
         torch::Tensor feedback = torch::zeros({numPages}, opts);
         Out[mip] = feedback;
-        p.feedback[mip] = feedback.data_ptr<unsigned char>();
+        p.feedback[mip] = feedback.data_ptr<bool>();
     }
 
     // Choose kernel variants based on channel count.
@@ -249,56 +244,23 @@ std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch:
     // Launch kernel.
     NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[func_idx], gridSize, blockSize, args, 0, stream));
 
-    for (int mip = 0; mip <= max_mip_level; mip++)
-    {
-        int numPages = pages[mip].size();
-        for (int i = 0; i < numPages; i++)
-        {
-            if (Out[mip][i].item<unsigned char>() == 1)
-                pages[mip][i].requires_grad_(true);
-            else
-                pages[mip][i].requires_grad_(false);
-        }
-    }
-
     // Return output tensor.
     return Out;
 
 }
 
 // Version without mipmaps.
-std::vector<torch::Tensor> virtual_texture_feedback(torch::Tensor uv, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages)
+std::vector<torch::Tensor> virtual_texture_feedback(torch::Tensor uv, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages)
 {
     torch::Tensor empty_tensor;
-    return virtual_texture_feedback_mip(uv, empty_tensor, empty_tensor, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, pages);
+    return virtual_texture_feedback_mip(uv, empty_tensor, empty_tensor, mask, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, pages);
 }
 
 //------------------------------------------------------------------------
 // Forward op.
 
-void* prepareCudaPages(const std::vector<torch::Tensor>& pages)
-{
-    float** cuda_pages;
-    cudaMalloc(&cuda_pages, sizeof(float*) * pages.size());
-    float** temp = new float*[pages.size()];
-    for (int page_index = 0; page_index < pages.size(); page_index++)
-    {
-        if (pages[page_index].defined() && pages[page_index].nbytes())
-        {
-            temp[page_index] = pages[page_index].data_ptr<float>();
-        }
-        else
-        {
-            temp[page_index] = NULL;
-        }
-    }
-    cudaMemcpy(cuda_pages, temp, sizeof(float*) * pages.size(), cudaMemcpyHostToDevice);
-    delete[] temp;
-    return cuda_pages;
-}
-
 torch::Tensor virtual_texture_fwd_mip(
-    torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, 
+    torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, 
     int filter_mode, int boundary_mode, 
     int texture_depth, int texture_height, int texture_width, int texture_channels,
     int page_size_x, int page_size_y, 
@@ -325,6 +287,9 @@ torch::Tensor virtual_texture_fwd_mip(
     p.page_size_y = page_size_y;
     p.mipLevelMax = max_mip_level;
 
+    bool has_mask = mask.defined() && mask.nbytes();
+    p.mask = has_mask ? mask.data_ptr<bool>() : NULL;
+
     // See if we have these tensors or not.
     bool has_uv_da = uv_da.defined() && uv_da.nbytes();
     bool has_mip_level_bias = mip_level_bias.defined() && mip_level_bias.nbytes();
@@ -340,19 +305,9 @@ torch::Tensor virtual_texture_fwd_mip(
     NVDR_CHECK_F32(uv);
     for (auto& mip_pages : pages)
     {
-        NVDR_CHECK_DEVICE(mip_pages);
+        // NVDR_CHECK_DEVICE(mip_pages);
         NVDR_CHECK_CONTIGUOUS(mip_pages);
         NVDR_CHECK_F32(mip_pages);
-        // for (auto& mip_page : mip_pages)
-        // {
-        //     NVDR_CHECK(mip_page.sizes().size() == 4 && 
-        //                mip_page.size(0) > 0 && 
-        //                mip_page.size(1) == page_size_y && 
-        //                mip_page.size(2) == page_size_x && 
-        //                mip_page.size(3) == texture_channels, 
-        //                "virtual texture pages must have shape[>0, page_size_y, page_size_x, texture_channels]");
-        // }
-
     }
     if (p.enableMip)
     {
@@ -375,6 +330,7 @@ torch::Tensor virtual_texture_fwd_mip(
     NVDR_CHECK(p.texWidth <= (1 << TEX_MAX_MIP_LEVEL) && p.texHeight <= (1 << TEX_MAX_MIP_LEVEL), "texture size too large");
 
 
+    auto mip_ptr = prepareCudaTensorArray(pages);
     for (int mip = 0; mip <= max_mip_level; mip++)
     {
         int2 sz = calcMipLevelSize(texture_width, texture_height, mip);
@@ -382,7 +338,7 @@ torch::Tensor virtual_texture_fwd_mip(
         int page_num_x = calcPageNum(sz.x, page_size_x);
         int numPages = page_num_x*page_num_y;
         NVDR_CHECK(numPages == pages[mip].size(), "virtual_texture_fwd_mip: The number of pages mismatches in mipmap level " + std::to_string(mip));
-        p.tex[mip] = (const float**)prepareCudaPages(pages[mip]);
+        p.tex[mip] = (const float**)mip_ptr[mip].data_ptr();
     }
     p.uv = uv.data_ptr<float>();
     p.uvDA = (p.enableMip && has_uv_da) ? uv_da.data_ptr<float>() : NULL;
@@ -390,7 +346,7 @@ torch::Tensor virtual_texture_fwd_mip(
 
     // Allocate output tensor.
     torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
-    torch::Tensor out = torch::empty({p.n, p.imgHeight, p.imgWidth, p.channels}, opts);
+    torch::Tensor out = torch::zeros({p.n, p.imgHeight, p.imgWidth, p.channels}, opts);
     p.out = out.data_ptr<float>();
 
     // Choose kernel variants based on channel count.
@@ -464,15 +420,13 @@ torch::Tensor virtual_texture_fwd_mip(
     // Launch kernel.
     NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[func_idx], gridSize, blockSize, args, 0, stream));
 
-    for (int mip = 0; mip <= max_mip_level; mip++)
-        cudaFree(p.tex[mip]);
     // Return output tensor.
     return out;
 }
 
 // Version without mipmaps.
 torch::Tensor virtual_texture_fwd(
-    torch::Tensor uv, 
+    torch::Tensor uv, torch::Tensor mask, 
     int filter_mode, int boundary_mode,
     int texture_depth, int texture_height, int texture_width, int texture_channels,
     int page_size_x, int page_size_y, 
@@ -481,7 +435,7 @@ torch::Tensor virtual_texture_fwd(
     torch::Tensor empty_tensor;
     std::vector<torch::Tensor> empty_vector;
     return virtual_texture_fwd_mip(
-        uv, empty_tensor, empty_tensor, 
+        uv, empty_tensor, empty_tensor, mask,
         filter_mode, boundary_mode,
         texture_depth, texture_height, texture_width, texture_channels,
         page_size_x, page_size_y, 
@@ -492,7 +446,7 @@ torch::Tensor virtual_texture_fwd(
 // Gradient op.
 
 std::tuple<std::vector<std::vector<torch::Tensor>>, torch::Tensor, torch::Tensor, torch::Tensor > 
-virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages)
+virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages)
 {
     NVDR_CHECK(texture_height>0 && (texture_height & (texture_height-1))==0, "virtual_texture_fwd_mip: Texture height must be power of two.");
     NVDR_CHECK(texture_width>0 && (texture_width & (texture_width-1))==0, "virtual_texture_fwd_mip: Texture width must be power of two.");
@@ -515,6 +469,9 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
     p.page_size_y = page_size_y;
     p.mipLevelMax = max_mip_level;
 
+    bool has_mask = mask.defined() && mask.nbytes();
+    p.mask = has_mask ? mask.data_ptr<bool>() : NULL;
+
     // See if we have these tensors or not.
     bool has_uv_da = uv_da.defined() && uv_da.nbytes();
     bool has_mip_level_bias = mip_level_bias.defined() && mip_level_bias.nbytes();
@@ -530,18 +487,9 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
     NVDR_CHECK_F32(uv);
     for (auto& mip_pages : pages)
     {
-        NVDR_CHECK_DEVICE(mip_pages);
+        // NVDR_CHECK_DEVICE(mip_pages);
         NVDR_CHECK_CONTIGUOUS(mip_pages);
         NVDR_CHECK_F32(mip_pages);
-        // for (auto& mip_page : mip_pages)
-        // {
-        //     NVDR_CHECK(mip_page.sizes().size() == 4 && 
-        //                mip_page.size(0) > 0 && 
-        //                mip_page.size(1) == page_size_y && 
-        //                mip_page.size(2) == page_size_x && 
-        //                mip_page.size(3) == texture_channels, 
-        //                "virtual texture pages must have shape[>0, page_size_y, page_size_x, texture_channels]");
-        // }
 
     }
     if (p.enableMip)
@@ -571,9 +519,10 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
     // Get contiguous version of dy.
     torch::Tensor dy_ = dy.contiguous();
 
+    auto mip_ptr = prepareCudaTensorArray(pages);
     for (int mip=0; mip <= max_mip_level; mip++)
     {
-        p.tex[mip] = (const float**)prepareCudaPages(pages[mip]);
+        p.tex[mip] = (const float**)mip_ptr[mip].data_ptr();
     }
     p.uv = uv.data_ptr<float>();
     p.dy = dy_.data_ptr<float>();
@@ -588,14 +537,18 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
         std::vector<torch::Tensor> mip_grad_tex(num_pages);
         for (int page_index = 0; page_index < num_pages; page_index++)
         {
-            if (pages[mip][page_index].defined() && pages[mip][page_index].nbytes())
+            if (pages[mip][page_index].defined() && pages[mip][page_index].nbytes() && pages[mip][page_index].is_cuda())
             {
                 torch::Tensor grad_page = torch::zeros_like(pages[mip][page_index]);
                 mip_grad_tex[page_index] = grad_page;
             }
         }
-        p.gradTex[mip] = (float**)prepareCudaPages(mip_grad_tex);
         grad_tex.push_back(mip_grad_tex);
+    }
+    auto grad_mip_ptr = prepareCudaTensorArray<false>(grad_tex);
+    for (int mip = 0; mip <= max_mip_level; mip++)
+    {
+        p.gradTex[mip] = (float**)grad_mip_ptr[mip].data_ptr();
     }
 
     // Allocate output tensor for uv gradient.
@@ -604,7 +557,7 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
     torch::Tensor grad_mip_level_bias;
     if (p.filterMode != TEX_MODE_NEAREST)
     {
-        grad_uv = torch::empty_like(uv);
+        grad_uv = torch::zeros_like(uv);
         p.gradUV = grad_uv.data_ptr<float>();
 
         // Gradients for things affecting mip level.
@@ -613,14 +566,14 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
             // Allocate output tensor for uv_da gradient.
             if (has_uv_da)
             {
-                grad_uv_da = torch::empty_like(uv_da);
+                grad_uv_da = torch::zeros_like(uv_da);
                 p.gradUVDA = grad_uv_da.data_ptr<float>();
             }
 
             // Allocate output tensor for mip_level_bias gradient.
             if (has_mip_level_bias)
             {
-                grad_mip_level_bias = torch::empty_like(mip_level_bias);
+                grad_mip_level_bias = torch::zeros_like(mip_level_bias);
                 p.gradMipLevelBias = grad_mip_level_bias.data_ptr<float>();
             }
         }
@@ -694,34 +647,32 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
         NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(mip_grad_func_tbl[channel_div_idx], gridSize, blockSize, args, sharedBytes, stream));
     }
 
-    for (int mip = 0; mip <= max_mip_level; mip++)
-        cudaFree(p.tex[mip]);
     // Return output tensors.
     return std::tuple<std::vector<std::vector<torch::Tensor>>, torch::Tensor, torch::Tensor, torch::Tensor >(grad_tex, grad_uv, grad_uv_da, grad_mip_level_bias);
 }
 
 // Version for nearest filter mode.
-std::vector<torch::Tensor> virtual_texture_grad_nearest(torch::Tensor uv, torch::Tensor dy, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages)
+std::vector<torch::Tensor> virtual_texture_grad_nearest(torch::Tensor uv, torch::Tensor dy, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages)
 {
     torch::Tensor empty_tensor;
     std::vector<torch::Tensor> empty_vector;
-    auto result = virtual_texture_grad_linear_mipmap_linear(uv, dy, empty_tensor, empty_tensor, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, {pages});
+    auto result = virtual_texture_grad_linear_mipmap_linear(uv, dy, empty_tensor, empty_tensor, mask, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, {pages});
     return std::get<0>(result)[0];
 }
 
 // Version for linear filter mode.
-std::tuple<std::vector<torch::Tensor>, torch::Tensor> virtual_texture_grad_linear(torch::Tensor uv, torch::Tensor dy, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages)
+std::tuple<std::vector<torch::Tensor>, torch::Tensor> virtual_texture_grad_linear(torch::Tensor uv, torch::Tensor dy, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages)
 {
     torch::Tensor empty_tensor;
     std::vector<torch::Tensor> empty_vector;
-    auto result = virtual_texture_grad_linear_mipmap_linear(uv, dy, empty_tensor, empty_tensor, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, {pages});
+    auto result = virtual_texture_grad_linear_mipmap_linear(uv, dy, empty_tensor, empty_tensor, mask, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, {pages});
     return std::tuple<std::vector<torch::Tensor>, torch::Tensor>(std::get<0>(result)[0], std::get<1>(result));
 }
 
 // Version for linear-mipmap-nearest mode.
-std::tuple<std::vector<std::vector<torch::Tensor>>, torch::Tensor > virtual_texture_grad_linear_mipmap_nearest(torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages)
+std::tuple<std::vector<std::vector<torch::Tensor>>, torch::Tensor > virtual_texture_grad_linear_mipmap_nearest(torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages)
 {
-    auto result = virtual_texture_grad_linear_mipmap_linear(uv, dy, uv_da, mip_level_bias, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, pages);
+    auto result = virtual_texture_grad_linear_mipmap_linear(uv, dy, uv_da, mip_level_bias, mask, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, pages);
     return std::tuple<std::vector<std::vector<torch::Tensor>>, torch::Tensor >(std::get<0>(result), std::get<1>(result));
 }
 
@@ -777,31 +728,11 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
             torch::Tensor mipmap = torch::zeros({texture_depth, page_height, page_width, texture_channels}, opts);
             out_pages.push_back(mipmap);
         }
-        // if (height_out < page_size_y || width_out < page_size_x)
-        // {
-        //     // If the outgoing mipmap is smaller than the size of a page, 
-        //     // then this mipmap level will be stored at its original size.
-        //     torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
-        //     torch::Tensor mipmap = torch::zeros({texture_depth, height_out, width_out, texture_channels}, opts);
-        //     out_pages.push_back(mipmap);
-        // }
-        // else
-        // {
-        //     // Since both height_out/width_out and page_size_y/page_size_x are power of two,
-        //     // page_num_y_out and page_num_x_out will be integers.
-        //     int page_num_y_out = height_out / page_size_y;
-        //     int page_num_x_out = width_out / page_size_x;
-        //     int page_num_out = page_num_y_out * page_num_x_out;
-        //     torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
-        //     for (int i = 0; i < page_num_out; i++)
-        //     {
-        //         torch::Tensor mipmap = torch::zeros({texture_depth, page_size_y, page_size_x, texture_channels}, opts);
-        //         out_pages.push_back(mipmap);
-        //     }
-        // }
 
-        p.tex = (float const**)prepareCudaPages(last_mipmap_pages);
-        p.out = (float**)prepareCudaPages(out_pages);
+        auto p_tex = prepareCudaTensorArray(last_mipmap_pages);
+        auto p_out = prepareCudaTensorArray<false>(out_pages);
+        p.tex = (const float**)p_tex.data_ptr();
+        p.out = (float**)p_out.data_ptr();
 
         p.channels = texture_channels;
         p.texWidth = width_in;
@@ -830,8 +761,6 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
 
         NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[func_idx], gridSize, blockSize, args, 0, stream));
     
-        cudaFree(p.tex);
-        cudaFree(p.out);
         last_mipmap_pages = out_pages;
         Out.push_back(out_pages);
     }

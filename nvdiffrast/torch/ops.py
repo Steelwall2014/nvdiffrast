@@ -43,6 +43,8 @@ def _get_plugin(gl=False):
             if cl_path is None:
                 raise RuntimeError("Could not locate a supported Microsoft Visual C++ installation")
             os.environ['PATH'] += ';' + cl_path
+    elif os.name == 'posix':
+        lib_dir = os.path.dirname(__file__) + "/../lib"
 
     # Compiler options.
     opts = ['-DNVDR_TORCH']
@@ -55,6 +57,10 @@ def _get_plugin(gl=False):
         elif os.name == 'nt':
             libs = ['gdi32', 'opengl32', 'user32', 'setgpu']
             ldflags = ['/LIBPATH:' + lib_dir] + ['/DEFAULTLIB:' + x for x in libs]
+    if os.name == 'posix':
+        ldflags += ['-L' + lib_dir] + ['-lmetis', '-ltbb']
+    elif os.name == 'nt':
+        ldflags += ['/DEFAULTLIB:metis']
 
     # List of source files.
     if gl:
@@ -76,13 +82,17 @@ def _get_plugin(gl=False):
             '../common/interpolate.cu',
             '../common/texture.cu',
             '../common/texture.cpp',
+            '../common/virtual_geometry_partition.cpp',
+            '../common/hash_table.cpp',
             '../common/virtual_texture.cu',
+            '../common/virtual_geometry.cu',
             '../common/antialias.cu',
             'torch_bindings.cpp',
             'torch_rasterize.cpp',
             'torch_interpolate.cpp',
             'torch_texture.cpp',
             'torch_virtual_texture.cpp',
+            'torch_virtual_geometry.cpp',
             'torch_antialias.cpp',
         ]
 
@@ -118,7 +128,7 @@ def _get_plugin(gl=False):
 
     # Compile and load.
     source_paths = [os.path.join(os.path.dirname(__file__), fn) for fn in source_files]
-    torch.utils.cpp_extension.load(name=plugin_name, sources=source_paths, extra_cflags=opts, extra_cuda_cflags=opts+['-lineinfo', '-G', '-g'], extra_ldflags=ldflags, with_cuda=True, verbose=False)
+    torch.utils.cpp_extension.load(name=plugin_name, sources=source_paths, extra_cflags=opts, extra_cuda_cflags=opts+['-lineinfo', '-G', '-g'], extra_ldflags=ldflags, with_cuda=True, verbose=True)
 
     # Import, cache, and return the compiled module.
     _cached_plugin[gl] = importlib.import_module(plugin_name)
@@ -726,7 +736,7 @@ def antialias_construct_topology_hash(tri):
 # Virtual texture feedback.
 #----------------------------------------------------------------------------
     
-def virtual_texture_feedback(texture_depth, texture_height, texture_width, texture_channels, pages: list[list[torch.Tensor]], uv, uv_da=None, mip_level_bias=None, filter_mode='auto', boundary_mode='wrap', page_size_x=512, page_size_y=512):
+def virtual_texture_feedback(texture_depth, texture_height, texture_width, texture_channels, pages: list[list[torch.Tensor]], uv, uv_da=None, mip_level_bias=None, mask=None, filter_mode='auto', boundary_mode='wrap', page_size_x=512, page_size_y=512):
     with torch.no_grad():
         # Default filter mode.
         if filter_mode == 'auto':
@@ -745,6 +755,9 @@ def virtual_texture_feedback(texture_depth, texture_height, texture_width, textu
         boundary_mode_dict = {'cube': 0, 'wrap': 1, 'clamp': 2, 'zero': 3}
         boundary_mode_enum = boundary_mode_dict[boundary_mode]
 
+        if mask is None:
+            mask = torch.tensor([])
+
         # Choose stub.
         if filter_mode == 'linear-mipmap-linear' or filter_mode == 'linear-mipmap-nearest':
             empty = torch.tensor([])
@@ -753,14 +766,14 @@ def virtual_texture_feedback(texture_depth, texture_height, texture_width, textu
             if mip_level_bias is None:
                 mip_level_bias = empty
             out = _get_plugin().virtual_texture_feedback_mip(
-                uv, uv_da, mip_level_bias, 
+                uv, uv_da, mip_level_bias, mask,
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, pages)
             return out
         else:
             out = _get_plugin().virtual_texture_feedback(
-                uv, 
+                uv, mask, 
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, pages)
@@ -788,7 +801,7 @@ def slice_mipmap(width, height, page_size_x, page_size_y, pages: list[torch.Tens
 class _virtual_texture_func_mip(torch.autograd.Function):
     @staticmethod
     def forward(ctx: torch.autograd.function.FunctionCtx, filter_mode, 
-                uv, uv_da, mip_level_bias, 
+                uv, uv_da, mip_level_bias, mask,
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, *pages):
@@ -797,28 +810,31 @@ class _virtual_texture_func_mip(torch.autograd.Function):
             uv_da = empty
         if mip_level_bias is None:
             mip_level_bias = empty
+        if mask is None:
+            mask = empty
         
         mip_pages = slice_mipmap(texture_width, texture_width, page_size_x, page_size_y, pages)
 
         out = _get_plugin().virtual_texture_fwd_mip(
-            uv, uv_da, mip_level_bias, 
+            uv, uv_da, mip_level_bias, mask,
             filter_mode_enum, boundary_mode_enum, 
             texture_depth, texture_height, texture_width, texture_channels, 
             page_size_x, page_size_y, mip_pages)
         ctx.save_for_backward(uv, uv_da, mip_level_bias, *pages)
-        ctx.saved_misc = filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y
+        ctx.mark_non_differentiable(mask)
+        ctx.saved_misc = mask, filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y
         return out
 
     @staticmethod
     def backward(ctx, dy):
         uv, uv_da, mip_level_bias, *pages = ctx.saved_tensors
-        filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y = ctx.saved_misc
+        mask, filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y = ctx.saved_misc
         
         mip_pages = slice_mipmap(texture_width, texture_width, page_size_x, page_size_y, pages)
 
         if filter_mode == 'linear-mipmap-linear':
             g_pages, g_uv, g_uv_da, g_mip_level_bias = _get_plugin().virtual_texture_grad_linear_mipmap_linear(
-                uv, dy, uv_da, mip_level_bias, 
+                uv, dy, uv_da, mip_level_bias, mask,
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, mip_pages)
@@ -826,19 +842,19 @@ class _virtual_texture_func_mip(torch.autograd.Function):
             # for i, page in enumerate(pages):
             #     page.grad = g_pages_flattened[i]
             return (None, 
-                    g_uv, g_uv_da, g_mip_level_bias, 
+                    g_uv, g_uv_da, g_mip_level_bias, None,
                     None, None, 
                     None, None, None, None,
                     None, None) + tuple(g_pages_flattened)
         else: # linear-mipmap-nearest
             g_pages, g_uv = _get_plugin().virtual_texture_grad_linear_mipmap_nearest(
-                uv, dy, uv_da, mip_level_bias, 
+                uv, dy, uv_da, mip_level_bias, mask,
                 filter_mode_enum, boundary_mode_enum,
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, mip_pages)
             g_pages_flattened = [page for mip in g_pages for page in mip]
             return (None, 
-                    g_uv, None, None, 
+                    g_uv, None, None, None,
                     None, None, 
                     None, None, None, None,
                     None, None) + tuple(g_pages_flattened)
@@ -847,47 +863,48 @@ class _virtual_texture_func_mip(torch.autograd.Function):
 class _virtual_texture_func(torch.autograd.Function):
     @staticmethod
     def forward(ctx, filter_mode, 
-                uv, 
+                uv, mask,
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, *pages):
         out = _get_plugin().virtual_texture_fwd(
-                uv, 
+                uv, mask,
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, pages)
         ctx.save_for_backward(uv, *pages)
-        ctx.saved_misc = filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y
+        ctx.mark_non_differentiable(mask)
+        ctx.saved_misc = mask, filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y
         return out
 
     @staticmethod
     def backward(ctx, dy):
         uv, *pages = ctx.saved_tensors
-        filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y = ctx.saved_misc
+        mask, filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y = ctx.saved_misc
         if filter_mode == 'linear':
             g_pages, g_uv = _get_plugin().virtual_texture_grad_linear(
-                uv, dy, 
+                uv, dy, mask,
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, pages)
             return (None, 
-                    g_uv, 
+                    g_uv, None,
                     None, None, 
                     None, None, None, None,
                     None, None) + tuple(g_pages)
         else: # nearest
             g_pages = _get_plugin().virtual_texture_grad_nearest(
-                uv, dy, 
+                uv, dy, mask,
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, pages)
             return (None, 
-                    None, 
+                    None, None,
                     None, None, 
                     None, None, None, None,
                     None, None) + tuple(g_pages)
     
-def virtual_texture(texture_depth, texture_height, texture_width, texture_channels, pages: list[list[torch.Tensor]], uv, uv_da=None, mip_level_bias=None, filter_mode='auto', boundary_mode='wrap', page_size_x=256, page_size_y=256):
+def virtual_texture(texture_depth, texture_height, texture_width, texture_channels, pages: list[list[torch.Tensor]], uv, uv_da=None, mip_level_bias=None, mask=None, filter_mode='auto', boundary_mode='wrap', page_size_x=256, page_size_y=256):
         
     # Default filter mode.
     if filter_mode == 'auto':
@@ -917,17 +934,20 @@ def virtual_texture(texture_depth, texture_height, texture_width, texture_channe
     boundary_mode_dict = {'cube': 0, 'wrap': 1, 'clamp': 2, 'zero': 3}
     boundary_mode_enum = boundary_mode_dict[boundary_mode]
 
+    if mask is None:
+        mask = torch.tensor([])
+
     # Choose stub.
     if filter_mode == 'linear-mipmap-linear' or filter_mode == 'linear-mipmap-nearest':
         flattened_pages = [page for mip in pages for page in mip]
         return _virtual_texture_func_mip.apply(filter_mode, 
-                                               uv, uv_da, mip_level_bias, 
+                                               uv, uv_da, mip_level_bias, mask,
                                                filter_mode_enum, boundary_mode_enum, 
                                                texture_depth, texture_height, texture_width, texture_channels, 
                                                page_size_x, page_size_y, *flattened_pages)
     else:
         return _virtual_texture_func.apply(filter_mode, 
-                                           uv, 
+                                           uv, mask,
                                            filter_mode_enum, boundary_mode_enum, 
                                            texture_depth, texture_height, texture_width, texture_channels, 
                                            page_size_x, page_size_y, *pages[0])
@@ -941,3 +961,18 @@ def virtual_texture_construct_mip(texture_depth, texture_height, texture_width, 
     return _get_plugin().virtual_texture_construct_mip(max_mip_level, 
                                                        texture_depth, texture_height, texture_width, texture_channels, 
                                                        page_size_x, page_size_y, pages)
+#----------------------------------------------------------------------------
+# Virtual Geometry Operations.
+#----------------------------------------------------------------------------
+
+def virtual_geometry_construct(pos, pos_idx, attributes=[], max_partition_size=16384):
+    with torch.no_grad():
+        return _get_plugin().virtual_geometry_construct(pos, pos_idx, max_partition_size, attributes)
+
+def virtual_geometry_frustum_cull(AABBs: torch.Tensor, frustums: torch.Tensor):
+    with torch.no_grad():
+        return _get_plugin().virtual_geometry_frustum_cull(AABBs, frustums)
+
+def virtual_geometry_accumulate_grad(attr, matching_verts):
+    with torch.no_grad():
+        _get_plugin().virtual_geometry_accumulate_grad(attr, matching_verts)

@@ -27,3 +27,36 @@ inline void nvdr_check_contiguous(at::ArrayRef<at::Tensor> ts, const char* func,
 inline void nvdr_check_f32(at::ArrayRef<at::Tensor> ts,        const char* func, const char* err_msg) { for (const at::Tensor& t : ts) TORCH_CHECK(t.dtype() == torch::kFloat32, func, err_msg); }
 inline void nvdr_check_i32(at::ArrayRef<at::Tensor> ts,        const char* func, const char* err_msg) { for (const at::Tensor& t : ts) TORCH_CHECK(t.dtype() == torch::kInt32, func, err_msg); }
 //------------------------------------------------------------------------
+
+template<typename T>
+auto prepareCudaArray(const std::vector<T>& InArray)
+{
+    // For some reason, cudaFree will cause the system crash without giving any message.
+    // So we use libtorch to allocate memory instead.
+    torch::TensorOptions Options = torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCPU);
+    torch::Tensor data = torch::from_blob((void*)InArray.data(), {int64_t(sizeof(T) * InArray.size())}, Options).cuda();
+    return data;
+}
+template<bool Const=true, typename TPtr = std::conditional_t<Const, const float*, float*>>
+auto prepareCudaTensorArray(const std::vector<torch::Tensor>& pages)
+{
+    std::vector<TPtr> mip_ptr;
+    for (int i = 0; i < pages.size(); i++)
+    {
+        bool has_tensor = pages[i].defined() && pages[i].nbytes() && pages[i].is_cuda();
+        mip_ptr.push_back(has_tensor ? pages[i].data_ptr<float>() : NULL);
+    }
+    return prepareCudaArray(mip_ptr);
+}
+
+template<bool Const=true, typename TPtr = std::conditional_t<Const, const float*, float*>>
+auto prepareCudaTensorArray(const std::vector<std::vector<torch::Tensor>>& pages)
+{
+    using TUniPtr = decltype(prepareCudaTensorArray<Const>(std::vector<torch::Tensor>()));
+    std::vector<TUniPtr> mip_ptr;
+    for (int mip = 0; mip < pages.size(); mip++)
+    {
+        mip_ptr.emplace_back(prepareCudaTensorArray<Const>(pages[mip]));
+    }
+    return mip_ptr;
+}

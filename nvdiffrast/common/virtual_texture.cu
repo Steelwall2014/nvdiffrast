@@ -502,6 +502,9 @@ static __forceinline__ __device__ void VirtualTextureFeedbackKernelTemplate(cons
     // Pixel index.
     int pidx = px + p.imgWidth * (py + p.imgHeight * pz);
 
+    if (p.mask && !p.mask[pidx])
+        return;
+
     // Get UV.
     float3 uv = make_float3(((const float2*)p.uv)[pidx], 0.f);
 
@@ -509,7 +512,7 @@ static __forceinline__ __device__ void VirtualTextureFeedbackKernelTemplate(cons
     if (FILTER_MODE == TEX_MODE_NEAREST)
     {
         int2 pi_tc = indexTextureNearest_vt(p, uv);
-        unsigned char* pOut = p.feedback[0];
+        bool* pOut = p.feedback[0];
         pOut[pi_tc.x] = true;
 
         return; // Exit.
@@ -521,79 +524,84 @@ static __forceinline__ __device__ void VirtualTextureFeedbackKernelTemplate(cons
     int    level1 = 0;   // Discrete level 1.
     calculateMipLevel_vt<BIAS_ONLY, FILTER_MODE>(level0, level1, flevel, p, pidx, uv, 0, 0);
 
-
-
-    // // Get texel indices and pointer for level 0.
-    // int4 tc0 = make_int4(0, 0, 0, 0);
-    // int4 pi0 = make_int4(0, 0, 0, 0);    // page index
-    // float2 uv0 = indexTextureLinear_vt(p, uv, pi0, tc0, level0);
-    // unsigned char* pOut0 = p.feedback[level0];
-
-    // pOut0[pi0.x] = true;
-    // pOut0[pi0.y] = true;
-    // pOut0[pi0.z] = true;
-    // pOut0[pi0.w] = true;
-
-    // if (FILTER_MODE == TEX_MODE_LINEAR || FILTER_MODE == TEX_MODE_LINEAR_MIPMAP_NEAREST)
-    // {
-    //     return; // Exit.
-    // }
-
-    // // Get texel indices and pointer for level 1.
-    // int4 tc1 = make_int4(0, 0, 0, 0);
-    // int4 pi1 = make_int4(0, 0, 0, 0);    // page index
-    // float2 uv1 = indexTextureLinear_vt(p, uv, pi1, tc1, level1);
-    // unsigned char* pOut1 = p.feedback[level1];
-
-    // if (flevel > 0.f)
-    // {
-    //     pOut1[pi1.x] = true;
-    //     pOut1[pi1.y] = true;
-    //     pOut1[pi1.z] = true;
-    //     pOut1[pi1.w] = true;
-    // }
-
-
-
-    unsigned char* pOut = p.feedback[0];
-    int page_num_x = calcPageNum(p.texWidth, p.page_size_x);
-    int page_num_y = calcPageNum(p.texHeight, p.page_size_y);
-    int4 coverage0 = calcPixelCoverage(p, uv, level0);
-    int start_pi_x0 = coverage0.x;
-    int end_pi_x0 = coverage0.x <= coverage0.y ? coverage0.y : coverage0.y+page_num_x;
-    int start_pi_y0 = coverage0.z;
-    int end_pi_y0 = coverage0.z <= coverage0.w ? coverage0.w : coverage0.w+page_num_y;
-    for (int pi_y = start_pi_y0; pi_y <= end_pi_y0; pi_y++)
+    // Mark the texels that will be directly accessed
     {
-        for (int pi_x = start_pi_x0; pi_x <= end_pi_x0; pi_x++)
+        // Get texel indices and pointer for level 0.
+        int4 tc0 = make_int4(0, 0, 0, 0);
+        int4 pi0 = make_int4(0, 0, 0, 0);    // page index
+        float2 uv0 = indexTextureLinear_vt(p, uv, pi0, tc0, level0);
+        bool* pOut0 = p.feedback[level0];
+
+        pOut0[pi0.x] = true;
+        pOut0[pi0.y] = true;
+        pOut0[pi0.z] = true;
+        pOut0[pi0.w] = true;
+
+        if (FILTER_MODE == TEX_MODE_LINEAR || FILTER_MODE == TEX_MODE_LINEAR_MIPMAP_NEAREST)
         {
-            int pi = calcPageIndex(p, pi_x%page_num_x, pi_y%page_num_y);
-            pOut[pi] = true;
+            return; // Exit.
+        }
+
+        // Get texel indices and pointer for level 1.
+        int4 tc1 = make_int4(0, 0, 0, 0);
+        int4 pi1 = make_int4(0, 0, 0, 0);    // page index
+        float2 uv1 = indexTextureLinear_vt(p, uv, pi1, tc1, level1);
+        bool* pOut1 = p.feedback[level1];
+
+        if (flevel > 0.f)
+        {
+            pOut1[pi1.x] = true;
+            pOut1[pi1.y] = true;
+            pOut1[pi1.z] = true;
+            pOut1[pi1.w] = true;
         }
     }
 
-    if (FILTER_MODE == TEX_MODE_LINEAR || FILTER_MODE == TEX_MODE_LINEAR_MIPMAP_NEAREST)
+    // A texel of higher mipmap level covers more than one texels of the first mipmap level.
+    // So some texels of the first mipmap level are directly accessed, but their 
+    // gradients may be affected by the texels of higher mipmap levels.
+    // That's why we need the following codes to calculate the coverage.
     {
-        return; // Exit.
-    }
-
-    int4 coverage1 = calcPixelCoverage(p, uv, level1);
-    int start_pi_x1 = coverage1.x;
-    int end_pi_x1 = coverage1.x <= coverage1.y ? coverage1.y : coverage1.y+page_num_x;
-    int start_pi_y1 = coverage1.z;
-    int end_pi_y1 = coverage1.z <= coverage1.w ? coverage1.w : coverage1.w+page_num_y;
-    if (flevel > 0.f)
-    {
-        for (int pi_y = start_pi_y1; pi_y <= end_pi_y1; pi_y++)
+        bool* pOut = p.feedback[0];
+        int page_num_x = calcPageNum(p.texWidth, p.page_size_x);
+        int page_num_y = calcPageNum(p.texHeight, p.page_size_y);
+        int4 coverage0 = calcPixelCoverage(p, uv, level0);
+        int start_pi_x0 = coverage0.x;
+        int end_pi_x0 = coverage0.x <= coverage0.y ? coverage0.y : coverage0.y+page_num_x;
+        int start_pi_y0 = coverage0.z;
+        int end_pi_y0 = coverage0.z <= coverage0.w ? coverage0.w : coverage0.w+page_num_y;
+        for (int pi_y = start_pi_y0; pi_y <= end_pi_y0; pi_y++)
         {
-            for (int pi_x = start_pi_x1; pi_x <= end_pi_x1; pi_x++)
+            for (int pi_x = start_pi_x0; pi_x <= end_pi_x0; pi_x++)
             {
                 int pi = calcPageIndex(p, pi_x%page_num_x, pi_y%page_num_y);
                 pOut[pi] = true;
             }
         }
-    }
+
+        if (FILTER_MODE == TEX_MODE_LINEAR || FILTER_MODE == TEX_MODE_LINEAR_MIPMAP_NEAREST)
+        {
+            return; // Exit.
+        }
+
+        int4 coverage1 = calcPixelCoverage(p, uv, level1);
+        int start_pi_x1 = coverage1.x;
+        int end_pi_x1 = coverage1.x <= coverage1.y ? coverage1.y : coverage1.y+page_num_x;
+        int start_pi_y1 = coverage1.z;
+        int end_pi_y1 = coverage1.z <= coverage1.w ? coverage1.w : coverage1.w+page_num_y;
+        if (flevel > 0.f)
+        {
+            for (int pi_y = start_pi_y1; pi_y <= end_pi_y1; pi_y++)
+            {
+                for (int pi_x = start_pi_x1; pi_x <= end_pi_x1; pi_x++)
+                {
+                    int pi = calcPageIndex(p, pi_x%page_num_x, pi_y%page_num_y);
+                    pOut[pi] = true;
+                }
+            }
+        }
     
+    }
 }
 
 // Template specializations.
@@ -619,11 +627,6 @@ __global__ void VirtualTextureFeedbackKernelLinearMipmapLinearBO4       (const V
 //------------------------------------------------------------------------
 // Virtual texture forward kernel
 
-template<class T> static __device__ __forceinline__ T temp_value(float x);
-template<> __device__ __forceinline__ float  temp_value<float> (float x)                      { return x; }
-template<> __device__ __forceinline__ float2 temp_value<float2>(float x)                      { return make_float2(x, x); }
-template<> __device__ __forceinline__ float4 temp_value<float4>(float x)                      { return make_float4(x, x, x, x); }
-
 template <class T, int C, bool BIAS_ONLY, int FILTER_MODE>
 static __forceinline__ __device__ void VirtualTextureFwdKernelTemplate(const VirtualTextureKernelParams p)
 {
@@ -637,6 +640,9 @@ static __forceinline__ __device__ void VirtualTextureFwdKernelTemplate(const Vir
 
     // Pixel index.
     int pidx = px + p.imgWidth * (py + p.imgHeight * pz);
+
+    if (p.mask && !p.mask[pidx])
+        return;
 
     // Output ptr.
     float* pOut = p.out + pidx * p.channels;
@@ -759,6 +765,9 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
 
     // Pixel index.
     int pidx = px + p.imgWidth * (py + p.imgHeight * pz);
+
+    if (p.mask && !p.mask[pidx])
+        return;
 
     // Early exit if output gradients are zero.
     const float* pDy = p.dy + pidx * p.channels;

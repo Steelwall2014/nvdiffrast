@@ -46,15 +46,42 @@ void VirtualTextureFwdKernelLinearMipmapNearestBO4          (const VirtualTextur
 void VirtualTextureFwdKernelLinearMipmapLinearBO1           (const VirtualTextureKernelParams p);
 void VirtualTextureFwdKernelLinearMipmapLinearBO2           (const VirtualTextureKernelParams p);
 void VirtualTextureFwdKernelLinearMipmapLinearBO4           (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelNearestHalf1                        (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelNearestHalf2                        (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelNearestHalf4                        (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearHalf1                         (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearHalf2                         (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearHalf4                         (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapNearestHalf1            (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapNearestHalf2            (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapNearestHalf4            (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapLinearHalf1             (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapLinearHalf2             (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapLinearHalf4             (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapNearestBOHalf1          (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapNearestBOHalf2          (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapNearestBOHalf4          (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapLinearBOHalf1           (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapLinearBOHalf2           (const VirtualTextureKernelParams p);
+void VirtualTextureFwdKernelLinearMipmapLinearBOHalf4           (const VirtualTextureKernelParams p);
 void VirtualTextureGradKernelNearest                        (const VirtualTextureKernelParams p);
 void VirtualTextureGradKernelLinear                         (const VirtualTextureKernelParams p);
 void VirtualTextureGradKernelLinearMipmapNearest            (const VirtualTextureKernelParams p);
 void VirtualTextureGradKernelLinearMipmapLinear             (const VirtualTextureKernelParams p);
 void VirtualTextureGradKernelLinearMipmapNearestBO          (const VirtualTextureKernelParams p);
 void VirtualTextureGradKernelLinearMipmapLinearBO           (const VirtualTextureKernelParams p);
+void VirtualTextureGradKernelNearestHalf                        (const VirtualTextureKernelParams p);
+void VirtualTextureGradKernelLinearHalf                         (const VirtualTextureKernelParams p);
+void VirtualTextureGradKernelLinearMipmapNearestHalf            (const VirtualTextureKernelParams p);
+void VirtualTextureGradKernelLinearMipmapLinearHalf             (const VirtualTextureKernelParams p);
+void VirtualTextureGradKernelLinearMipmapNearestBOHalf          (const VirtualTextureKernelParams p);
+void VirtualTextureGradKernelLinearMipmapLinearBOHalf           (const VirtualTextureKernelParams p);
 void VirtualTextureMipmapKernel1                            (const VirtualTextureMipmapParams p);
 void VirtualTextureMipmapKernel2                            (const VirtualTextureMipmapParams p);
 void VirtualTextureMipmapKernel4                            (const VirtualTextureMipmapParams p);
+void VirtualTextureMipmapKernelHalf1                            (const VirtualTextureMipmapParams p);
+void VirtualTextureMipmapKernelHalf2                            (const VirtualTextureMipmapParams p);
+void VirtualTextureMipmapKernelHalf4                            (const VirtualTextureMipmapParams p);
 void VirtualTextureMipGradKernel1                           (const VirtualTextureKernelParams p, int, int);
 void VirtualTextureMipGradKernel2                           (const VirtualTextureKernelParams p, int, int);
 void VirtualTextureMipGradKernel4                           (const VirtualTextureKernelParams p, int, int);
@@ -259,6 +286,28 @@ std::vector<torch::Tensor> virtual_texture_feedback(torch::Tensor uv, torch::Ten
 //------------------------------------------------------------------------
 // Forward op.
 
+// Check and get dtype of cuda pages
+bool check_and_get_type(std::vector<std::vector<torch::Tensor>> pages, torch::ScalarType& dtype)
+{
+    std::vector<torch::Tensor> cuda_pages;
+    for (auto& mip_pages : pages)
+    {
+        for (auto& page : mip_pages)
+        {
+            if (at::cuda::check_device({page}))
+            {
+                cuda_pages.push_back(page);
+            }
+        }
+    }
+    if (cuda_pages.empty())
+        return false;
+
+    NVDR_CHECK_F16F32(cuda_pages);
+    dtype = cuda_pages[0].dtype().toScalarType();
+    return true;
+}
+
 torch::Tensor virtual_texture_fwd_mip(
     torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, 
     int filter_mode, int boundary_mode, 
@@ -270,6 +319,7 @@ torch::Tensor virtual_texture_fwd_mip(
     NVDR_CHECK(texture_width>0 && (texture_width & (texture_width-1))==0, "virtual_texture_fwd_mip: Texture width must be power of two.");
     NVDR_CHECK(page_size_y>0 && (page_size_y & (page_size_y-1))==0, "virtual_texture_fwd_mip: Page Y must be power of two.");
     NVDR_CHECK(page_size_x>0 && (page_size_x & (page_size_x-1))==0, "virtual_texture_fwd_mip: Page X must be power of two.");
+
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(uv));
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -303,12 +353,6 @@ torch::Tensor virtual_texture_fwd_mip(
     NVDR_CHECK_DEVICE(uv);
     NVDR_CHECK_CONTIGUOUS(uv);
     NVDR_CHECK_F32(uv);
-    for (auto& mip_pages : pages)
-    {
-        // NVDR_CHECK_DEVICE(mip_pages);
-        NVDR_CHECK_CONTIGUOUS(mip_pages);
-        NVDR_CHECK_F32(mip_pages);
-    }
     if (p.enableMip)
     {
         if (has_uv_da)
@@ -345,9 +389,13 @@ torch::Tensor virtual_texture_fwd_mip(
     p.mipLevelBias = (p.enableMip && has_mip_level_bias) ? mip_level_bias.data_ptr<float>() : NULL;
 
     // Allocate output tensor.
-    torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+    torch::ScalarType dtype;
+    bool has_cuda_pages = check_and_get_type(pages, dtype);
+    torch::TensorOptions opts = torch::TensorOptions().dtype(dtype).device(torch::kCUDA);
     torch::Tensor out = torch::zeros({p.n, p.imgHeight, p.imgWidth, p.channels}, opts);
-    p.out = out.data_ptr<float>();
+    if (!has_cuda_pages)
+        return out;
+    p.out = (float*)out.data_ptr();
 
     // Choose kernel variants based on channel count.
     void* args[] = {&p};
@@ -384,7 +432,7 @@ torch::Tensor virtual_texture_fwd_mip(
     dim3 gridSize  = getLaunchGridSize(blockSize, p.imgWidth, p.imgHeight, p.n);
 
     // Choose kernel based on filter mode, cube mode, bias-only mode, and datatype.
-    void* func_tbl[TEX_MODE_COUNT * 2 * 3] = {
+    void* func_tbl[TEX_MODE_COUNT * 2 * 3 * 2] = {
         (void*)VirtualTextureFwdKernelNearest1,
         (void*)VirtualTextureFwdKernelNearest2,
         (void*)VirtualTextureFwdKernelNearest4,
@@ -409,6 +457,30 @@ torch::Tensor virtual_texture_fwd_mip(
         (void*)VirtualTextureFwdKernelLinearMipmapLinearBO1,
         (void*)VirtualTextureFwdKernelLinearMipmapLinearBO2,
         (void*)VirtualTextureFwdKernelLinearMipmapLinearBO4,
+        (void*)VirtualTextureFwdKernelNearestHalf1,
+        (void*)VirtualTextureFwdKernelNearestHalf2,
+        (void*)VirtualTextureFwdKernelNearestHalf4,
+        (void*)VirtualTextureFwdKernelLinearHalf1,
+        (void*)VirtualTextureFwdKernelLinearHalf2,
+        (void*)VirtualTextureFwdKernelLinearHalf4,
+        (void*)VirtualTextureFwdKernelLinearMipmapNearestHalf1,
+        (void*)VirtualTextureFwdKernelLinearMipmapNearestHalf2,
+        (void*)VirtualTextureFwdKernelLinearMipmapNearestHalf4,
+        (void*)VirtualTextureFwdKernelLinearMipmapLinearHalf1,
+        (void*)VirtualTextureFwdKernelLinearMipmapLinearHalf2,
+        (void*)VirtualTextureFwdKernelLinearMipmapLinearHalf4,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        (void*)VirtualTextureFwdKernelLinearMipmapNearestBOHalf1,
+        (void*)VirtualTextureFwdKernelLinearMipmapNearestBOHalf2,
+        (void*)VirtualTextureFwdKernelLinearMipmapNearestBOHalf4,
+        (void*)VirtualTextureFwdKernelLinearMipmapLinearBOHalf1,
+        (void*)VirtualTextureFwdKernelLinearMipmapLinearBOHalf2,
+        (void*)VirtualTextureFwdKernelLinearMipmapLinearBOHalf4,
     };
 
     // Function index.
@@ -416,6 +488,8 @@ torch::Tensor virtual_texture_fwd_mip(
     if (p.enableMip && !has_uv_da)
         func_idx += TEX_MODE_COUNT; // Bias-only variant.
     func_idx = func_idx * 3 + channel_div_idx; // Choose vector size.
+    if (dtype == torch::kHalf)
+        func_idx += TEX_MODE_COUNT * 2 * 3; // Choose half variant.
 
     // Launch kernel.
     NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[func_idx], gridSize, blockSize, args, 0, stream));
@@ -485,13 +559,8 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
     NVDR_CHECK_DEVICE(uv);
     NVDR_CHECK_CONTIGUOUS(uv);
     NVDR_CHECK_F32(uv);
-    for (auto& mip_pages : pages)
-    {
-        // NVDR_CHECK_DEVICE(mip_pages);
-        NVDR_CHECK_CONTIGUOUS(mip_pages);
-        NVDR_CHECK_F32(mip_pages);
-
-    }
+    torch::ScalarType dtype;
+    bool has_cuda_pages = check_and_get_type(pages, dtype);
     if (p.enableMip)
     {
         if (has_uv_da)
@@ -525,7 +594,7 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
         p.tex[mip] = (const float**)mip_ptr[mip].data_ptr();
     }
     p.uv = uv.data_ptr<float>();
-    p.dy = dy_.data_ptr<float>();
+    p.dy = (float*)dy_.data_ptr();
     p.uvDA = (p.enableMip && has_uv_da) ? uv_da.data_ptr<float>() : NULL;
     p.mipLevelBias = (p.enableMip && has_mip_level_bias) ? mip_level_bias.data_ptr<float>() : NULL;
 
@@ -613,7 +682,7 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
     dim3 blockSize = getLaunchBlockSize(TEX_GRAD_MAX_KERNEL_BLOCK_WIDTH, TEX_GRAD_MAX_KERNEL_BLOCK_HEIGHT, p.imgWidth, p.imgHeight);
     dim3 gridSize  = getLaunchGridSize(blockSize, p.imgWidth, p.imgHeight, p.n);
 
-    void* func_tbl[TEX_MODE_COUNT * 2] = {
+    void* func_tbl[TEX_MODE_COUNT * 2 * 2] = {
         (void*)VirtualTextureGradKernelNearest,
         (void*)VirtualTextureGradKernelLinear,
         (void*)VirtualTextureGradKernelLinearMipmapNearest,
@@ -622,12 +691,22 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
         NULL,
         (void*)VirtualTextureGradKernelLinearMipmapNearestBO,
         (void*)VirtualTextureGradKernelLinearMipmapLinearBO,
+        (void*)VirtualTextureGradKernelNearestHalf,
+        (void*)VirtualTextureGradKernelLinearHalf,
+        (void*)VirtualTextureGradKernelLinearMipmapNearestHalf,
+        (void*)VirtualTextureGradKernelLinearMipmapLinearHalf,
+        NULL,
+        NULL,
+        (void*)VirtualTextureGradKernelLinearMipmapNearestBOHalf,
+        (void*)VirtualTextureGradKernelLinearMipmapLinearBOHalf,
     };
 
     // Function index.
     int func_idx = p.filterMode;
     if (p.enableMip && !has_uv_da)
         func_idx += TEX_MODE_COUNT; // Bias-only variant.
+    if (dtype == torch::kHalf)
+        func_idx += TEX_MODE_COUNT * 2; // Choose half variant.
 
     // Launch main gradient kernel.
     NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[func_idx], gridSize, blockSize, args, 0, stream));
@@ -683,7 +762,7 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
     NVDR_CHECK(!pages.empty(), "virtual_texture_construct_mip: Pages is empty");
     NVDR_CHECK_DEVICE(pages);
     NVDR_CHECK_CONTIGUOUS(pages);
-    NVDR_CHECK_F32(pages);
+    NVDR_CHECK_F16F32(pages);
     NVDR_CHECK(texture_height>0 && (texture_height & (texture_height-1))==0, "virtual_texture_construct_mip: Texture height must be power of two.");
     NVDR_CHECK(texture_width>0 && (texture_width & (texture_width-1))==0, "virtual_texture_construct_mip: Texture width must be power of two.");
     NVDR_CHECK(page_size_y>0 && (page_size_y & (page_size_y-1))==0, "virtual_texture_construct_mip: Page Y must be power of two.");
@@ -700,7 +779,8 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
                    pages[i].size(2) == page_size_x && 
                    pages[i].size(3) == texture_channels, "pages[i] must have shape[texture_depth, page_size_y, page_size_x, texture_channels]");
     }
-
+    torch::ScalarType dtype;
+    bool has_cuda_pages = check_and_get_type({pages}, dtype);
     max_mip_level = calculateMaxMipLevel(texture_width, texture_height, max_mip_level);
 
     VirtualTextureMipmapParams p = {};
@@ -720,7 +800,7 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
         int page_num_out = page_num_y_out * page_num_x_out;
 
         std::vector<torch::Tensor> out_pages;
-        torch::TensorOptions opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+        torch::TensorOptions opts = torch::TensorOptions().dtype(dtype).device(torch::kCUDA);
         for (int i = 0; i < page_num_out; i++)
         {
             int page_width = width_out < page_size_x ? width_out : page_size_x;
@@ -752,12 +832,17 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
         else if (!(p.channels & 1))
             channel_div_idx = 1;  // Channel count divisible by 2.
 
-        void* func_tbl[3] = {
+        void* func_tbl[3 * 2] = {
             (void*)VirtualTextureMipmapKernel1,
             (void*)VirtualTextureMipmapKernel2,
             (void*)VirtualTextureMipmapKernel4,
+            (void*)VirtualTextureMipmapKernelHalf1,
+            (void*)VirtualTextureMipmapKernelHalf2,
+            (void*)VirtualTextureMipmapKernelHalf4,
         };
         int func_idx = channel_div_idx;
+        if (dtype == torch::kHalf)
+            func_idx += 3; // Choose half variant.
 
         NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[func_idx], gridSize, blockSize, args, 0, stream));
     

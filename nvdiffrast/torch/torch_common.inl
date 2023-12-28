@@ -22,10 +22,19 @@
 #define NVDR_CHECK_CONTIGUOUS(...) do { nvdr_check_contiguous({__VA_ARGS__}, __func__, "(): Inputs " #__VA_ARGS__ " must be contiguous tensors"); } while(0)
 #define NVDR_CHECK_F32(...) do { nvdr_check_f32({__VA_ARGS__}, __func__, "(): Inputs " #__VA_ARGS__ " must be float32 tensors"); } while(0)
 #define NVDR_CHECK_I32(...) do { nvdr_check_i32({__VA_ARGS__}, __func__, "(): Inputs " #__VA_ARGS__ " must be int32 tensors"); } while(0)
+#define NVDR_CHECK_F16F32(...) do { nvdr_check_f16f32({__VA_ARGS__}, __func__, "(): Inputs " #__VA_ARGS__ " must be float16 or float32 tensors and must have the same dtype"); } while(0)
 inline void nvdr_check_cpu(at::ArrayRef<at::Tensor> ts,        const char* func, const char* err_msg) { for (const at::Tensor& t : ts) TORCH_CHECK(t.device().type() == c10::DeviceType::CPU, func, err_msg); }
 inline void nvdr_check_contiguous(at::ArrayRef<at::Tensor> ts, const char* func, const char* err_msg) { for (const at::Tensor& t : ts) TORCH_CHECK(t.is_contiguous(), func, err_msg); }
 inline void nvdr_check_f32(at::ArrayRef<at::Tensor> ts,        const char* func, const char* err_msg) { for (const at::Tensor& t : ts) TORCH_CHECK(t.dtype() == torch::kFloat32, func, err_msg); }
 inline void nvdr_check_i32(at::ArrayRef<at::Tensor> ts,        const char* func, const char* err_msg) { for (const at::Tensor& t : ts) TORCH_CHECK(t.dtype() == torch::kInt32, func, err_msg); }
+inline void nvdr_check_f16f32(at::ArrayRef<at::Tensor> ts,     const char* func, const char* err_msg) 
+{ 
+    if (ts.empty()) return;
+    auto dtype = ts[0].dtype();
+    TORCH_CHECK(dtype == torch::kFloat16 || dtype == torch::kFloat32, func, err_msg); 
+    for (const at::Tensor& t : ts) 
+        TORCH_CHECK(t.dtype() == dtype, func, err_msg); 
+}
 //------------------------------------------------------------------------
 
 template<typename T>
@@ -44,7 +53,7 @@ auto prepareCudaTensorArray(const std::vector<torch::Tensor>& pages)
     for (int i = 0; i < pages.size(); i++)
     {
         bool has_tensor = pages[i].defined() && pages[i].nbytes() && pages[i].is_cuda();
-        mip_ptr.push_back(has_tensor ? pages[i].data_ptr<float>() : NULL);
+        mip_ptr.push_back(has_tensor ? (float*)pages[i].data_ptr() : NULL);
     }
     return prepareCudaArray(mip_ptr);
 }

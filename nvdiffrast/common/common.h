@@ -8,6 +8,7 @@
 
 #pragma once
 #include <cuda.h>
+#include <cuda_fp16.h>
 #include <stdint.h>
 
 //------------------------------------------------------------------------
@@ -23,6 +24,29 @@ dim3 getLaunchGridSize(dim3 blockSize, int width, int height, int depth);
 
 //------------------------------------------------------------------------
 // Helpers for CUDA vector types.
+
+struct alignas(4) half4 {
+    half x, y, z, w;
+    __host__ __device__ half4() = default;
+    __host__ __device__ half4(half x, half y, half z, half w) { this->x=x; this->y=y; this->z=z; this->w=w; }
+};
+
+template<typename T> struct value_type_traits { };
+template<> struct value_type_traits<half> { using type = half; };
+template<> struct value_type_traits<half2> { using type = half; };
+template<> struct value_type_traits<half4> { using type = half; };
+template<> struct value_type_traits<float> { using type = float; };
+template<> struct value_type_traits<float2> { using type = float; };
+template<> struct value_type_traits<float4> { using type = float; };
+
+template<typename T, typename U> __device__ __forceinline__ T cast(U x) { return (T)x; }
+template<> __device__ __forceinline__ half cast(float x) { return __float2half(x); }
+template<> __device__ __forceinline__ float cast(half x) { return __half2float(x); }
+template<> __device__ __forceinline__ half2 cast(float x) { return half2(cast<half>(x), cast<half>(x)); }
+template<> __device__ __forceinline__ half4 cast(float x) { return half4(cast<half>(x), cast<half>(x), cast<half>(x), cast<half>(x)); }
+template<> __device__ __forceinline__ float cast(float x) { return x; }
+template<> __device__ __forceinline__ float2 cast(float x) { return make_float2(x, x); }
+template<> __device__ __forceinline__ float4 cast(float x) { return make_float4(x, x, x, x); }
 
 static __device__ __forceinline__ float2&   operator*=  (float2& a, const float2& b)       { a.x *= b.x; a.y *= b.y; return a; }
 static __device__ __forceinline__ float2&   operator+=  (float2& a, const float2& b)       { a.x += b.x; a.y += b.y; return a; }
@@ -165,11 +189,26 @@ static __device__ __forceinline__ uint4     operator-   (const uint4& a, unsigne
 static __device__ __forceinline__ uint4     operator*   (unsigned int a, const uint4& b)   { return make_uint4(a * b.x, a * b.y, a * b.z, a * b.w); }
 static __device__ __forceinline__ uint4     operator+   (unsigned int a, const uint4& b)   { return make_uint4(a + b.x, a + b.y, a + b.z, a + b.w); }
 static __device__ __forceinline__ uint4     operator-   (unsigned int a, const uint4& b)   { return make_uint4(a - b.x, a - b.y, a - b.z, a - b.w); }
+static __device__ __forceinline__ half      operator+   (const half &lh, const half &rh)   { return __hadd(lh, rh); }
+static __device__ __forceinline__ half      operator-   (const half &lh, const half &rh)   { return __hsub(lh, rh); }
+static __device__ __forceinline__ half      operator*   (const half &lh, const half &rh)   { return __hmul(lh, rh); }
+static __device__ __forceinline__ half      operator+=  (const half &lh, const half &rh)   { return __hsub(lh, rh); }
+static __device__ __forceinline__ half&     operator+=  (half &lh, const half &rh)         { lh = __hadd(lh, rh); return lh; }
+static __device__ __forceinline__ half2     operator*   (const half2 &lh, const half2 &rh) { return __hmul2(lh, rh); }
+static __device__ __forceinline__ half2&    operator+=  (half2 &lh, const half2 &rh)       { lh = __hadd2(lh, rh); return lh; }
+static __device__ __forceinline__ half4     operator+   (const half4& a, const half4& b)   { return half4(a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w); }
+static __device__ __forceinline__ half4     operator*   (const half4& a, float b)          { return half4(a.x*cast<half>(b), a.y*cast<half>(b), a.z*cast<half>(b), a.w*cast<half>(b)); }
+static __device__ __forceinline__ half4     operator*   (const half4& a, const half4& b)   { return half4(a.x*b.x, a.y*b.y, a.z*b.z, a.w*b.w); }
+static __device__ __forceinline__ half4&    operator+=  (half4& a, const half4& b)         { a = a + b; return a; }
+static __device__ __forceinline__ half4&    operator*=  (half4& a, float b)                { a = a * b; return a; }
 
 template<class T> static __device__ __forceinline__ T zero_value(void);
 template<> __device__ __forceinline__ float  zero_value<float> (void)                      { return 0.f; }
 template<> __device__ __forceinline__ float2 zero_value<float2>(void)                      { return make_float2(0.f, 0.f); }
 template<> __device__ __forceinline__ float4 zero_value<float4>(void)                      { return make_float4(0.f, 0.f, 0.f, 0.f); }
+template<> __device__ __forceinline__ half   zero_value<half> (void)                       { return cast<half>(0.f); }
+template<> __device__ __forceinline__ half2  zero_value<half2>(void)                       { return cast<half2>(0.f); }
+template<> __device__ __forceinline__ half4  zero_value<half4>(void)                       { return cast<half4>(0.f); }
 static __device__ __forceinline__ float3 make_float3(const float2& a, float b)             { return make_float3(a.x, a.y, b); }
 static __device__ __forceinline__ float4 make_float4(const float3& a, float b)             { return make_float4(a.x, a.y, a.z, b); }
 static __device__ __forceinline__ float4 make_float4(const float2& a, const float2& b)     { return make_float4(a.x, a.y, b.x, b.y); }

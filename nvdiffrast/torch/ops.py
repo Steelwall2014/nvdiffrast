@@ -736,7 +736,7 @@ def antialias_construct_topology_hash(tri):
 # Virtual texture feedback.
 #----------------------------------------------------------------------------
     
-def virtual_texture_feedback(texture_depth, texture_height, texture_width, texture_channels, pages: list[list[torch.Tensor]], uv, uv_da=None, mip_level_bias=None, mask=None, filter_mode='auto', boundary_mode='wrap', page_size_x=512, page_size_y=512):
+def virtual_texture_feedback(texture_depth, texture_height, texture_width, texture_channels, uv, uv_da=None, mip_level_bias=None, mask=None, filter_mode='auto', boundary_mode='wrap', page_size_x=512, page_size_y=512, max_mip_level=None):
     with torch.no_grad():
         # Default filter mode.
         if filter_mode == 'auto':
@@ -760,6 +760,11 @@ def virtual_texture_feedback(texture_depth, texture_height, texture_width, textu
 
         # Choose stub.
         if filter_mode == 'linear-mipmap-linear' or filter_mode == 'linear-mipmap-nearest':
+            if max_mip_level is None:
+                max_mip_level = -1
+            else:
+                max_mip_level = int(max_mip_level)
+                assert max_mip_level >= 0
             empty = torch.tensor([])
             if uv_da is None:
                 uv_da = empty
@@ -769,14 +774,14 @@ def virtual_texture_feedback(texture_depth, texture_height, texture_width, textu
                 uv, uv_da, mip_level_bias, mask,
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
-                page_size_x, page_size_y, pages)
+                page_size_x, page_size_y, max_mip_level)
             return out
         else:
             out = _get_plugin().virtual_texture_feedback(
                 uv, mask, 
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
-                page_size_x, page_size_y, pages)
+                page_size_x, page_size_y)
             return out
 
 def calcPageNum(wh, page_size) -> int:
@@ -952,15 +957,22 @@ def virtual_texture(texture_depth, texture_height, texture_width, texture_channe
                                            texture_depth, texture_height, texture_width, texture_channels, 
                                            page_size_x, page_size_y, *pages[0])
 
-def virtual_texture_construct_mip(texture_depth, texture_height, texture_width, texture_channels, pages: list[torch.Tensor], page_size_x=512, page_size_y=512, max_mip_level=None):
+def virtual_texture_construct_mip(texture_depth, texture_height, texture_width, texture_channels, pages: list[torch.Tensor], page_size_x=512, page_size_y=512, max_mip_level=None, use_cuda=False):
+    # If use_cuda is False, pages must have data type float32 and reside in CPU memory.
     if max_mip_level is None:
         max_mip_level = -1
     else:
         max_mip_level = int(max_mip_level)
         assert max_mip_level >= 0
-    return _get_plugin().virtual_texture_construct_mip(max_mip_level, 
+    if use_cuda:
+        return _get_plugin().virtual_texture_construct_mip_cuda(max_mip_level, 
                                                        texture_depth, texture_height, texture_width, texture_channels, 
                                                        page_size_x, page_size_y, pages)
+    else:
+        return _get_plugin().virtual_texture_construct_mip(max_mip_level, 
+                                                       texture_depth, texture_height, texture_width, texture_channels, 
+                                                       page_size_x, page_size_y, pages)
+
 #----------------------------------------------------------------------------
 # Virtual Geometry Operations.
 #----------------------------------------------------------------------------

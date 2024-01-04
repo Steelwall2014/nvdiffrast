@@ -33,12 +33,9 @@ static __device__ __forceinline__ void accum_from_mem(float* a, int s, float4 b,
 static __device__ __forceinline__ void accum_to_mem(float&  a, float* b, int s) { a += b[0]; }
 static __device__ __forceinline__ void accum_to_mem(float2& a, float* b, int s) { float2 v = a; v.x += b[0]; v.y += b[s]; a = v; }
 static __device__ __forceinline__ void accum_to_mem(float4& a, float* b, int s) { float4 v = a; v.x += b[0]; v.y += b[s]; v.z += b[2*s]; v.w += b[3*s]; a = v; }
-static __device__ __forceinline__ void accum_from_mem(half* a, int s, half  b, half c) { a[0] += b * c; }
-static __device__ __forceinline__ void accum_from_mem(half* a, int s, half2 b, half c) { a[0] += b.x * c; a[s] += b.y * c; }
-static __device__ __forceinline__ void accum_from_mem(half* a, int s, half4 b, half c) { a[0] += b.x * c; a[s] += b.y * c; a[2*s] += b.z * c; a[3*s] += b.w * c; }
-static __device__ __forceinline__ void accum_to_mem(half&  a, half* b, int s) { a += b[0]; }
-static __device__ __forceinline__ void accum_to_mem(half2& a, half* b, int s) { half2 v = a; v.x += b[0]; v.y += b[s]; a = v; }
-static __device__ __forceinline__ void accum_to_mem(half4& a, half* b, int s) { half4 v = a; v.x += b[0]; v.y += b[s]; v.z += b[2*s]; v.w += b[3*s]; a = v; }
+static __device__ __forceinline__ void accum_to_mem(half&  a, float* b, int s) { a += cast<half>(b[0]); }
+static __device__ __forceinline__ void accum_to_mem(half2& a, float* b, int s) { half2 v = a; v.x += cast<half>(b[0]); v.y += cast<half>(b[s]); a = v; }
+static __device__ __forceinline__ void accum_to_mem(half4& a, float* b, int s) { half4 v = a; v.x += cast<half>(b[0]); v.y += cast<half>(b[s]); v.z += cast<half>(b[2*s]); v.w += cast<half>(b[3*s]); a = v; }
 static __device__ __forceinline__ bool isfinite_vec3(const float3& a) { return isfinite(a.x) && isfinite(a.y) && isfinite(a.z); }
 static __device__ __forceinline__ bool isfinite_vec4(const float4& a) { return isfinite(a.x) && isfinite(a.y) && isfinite(a.z) && isfinite(a.w); }
 template<class T> static __device__ __forceinline__ T lerp  (const T& a, const T& b, float c) { return a + c * (b - a); }
@@ -591,7 +588,7 @@ static __forceinline__ __device__ void VirtualTextureFeedbackKernelTemplate(cons
     }
 
     // A texel of higher mipmap level covers more than one texels of the first mipmap level.
-    // So some texels of the first mipmap level are directly accessed, but their 
+    // So some texels of the first mipmap level are not directly accessed, but their 
     // gradients may be affected by the texels of higher mipmap levels.
     // That's why we need the following codes to calculate the coverage.
     {
@@ -881,7 +878,7 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
         // Accumulate texture gradients.
         for (int i=0; i < p.channels; i++)
         {
-            caAtomicAddTexture((half*)pOut, 0, tc + i, (half)pDy[i]);
+            caAtomicAddTexture(pOut, 0, tc + i, pDy[i]);
         }
 
         return; // Exit.
@@ -1056,12 +1053,12 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
 }
 
 // Template specializations.
-__global__ void VirtualTextureGradKernelNearest                    (const VirtualTextureKernelParams p) { /*VirtualTextureGradKernelTemplate<float, false, TEX_MODE_NEAREST>(p);*/ }
-__global__ void VirtualTextureGradKernelLinear                     (const VirtualTextureKernelParams p) { /*VirtualTextureGradKernelTemplate<float, false, TEX_MODE_LINEAR>(p);*/ }
-__global__ void VirtualTextureGradKernelLinearMipmapNearest        (const VirtualTextureKernelParams p) { /*VirtualTextureGradKernelTemplate<float, false, TEX_MODE_LINEAR_MIPMAP_NEAREST>(p);*/ }
-__global__ void VirtualTextureGradKernelLinearMipmapLinear         (const VirtualTextureKernelParams p) { /*VirtualTextureGradKernelTemplate<float, false, TEX_MODE_LINEAR_MIPMAP_LINEAR>(p);*/ }
-__global__ void VirtualTextureGradKernelLinearMipmapNearestBO      (const VirtualTextureKernelParams p) { /*VirtualTextureGradKernelTemplate<float, true,  TEX_MODE_LINEAR_MIPMAP_NEAREST>(p);*/ }
-__global__ void VirtualTextureGradKernelLinearMipmapLinearBO       (const VirtualTextureKernelParams p) { /*VirtualTextureGradKernelTemplate<float, true,  TEX_MODE_LINEAR_MIPMAP_LINEAR>(p);*/ }
+__global__ void VirtualTextureGradKernelNearest                    (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<float, false, TEX_MODE_NEAREST>(p); }
+__global__ void VirtualTextureGradKernelLinear                     (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<float, false, TEX_MODE_LINEAR>(p); }
+__global__ void VirtualTextureGradKernelLinearMipmapNearest        (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<float, false, TEX_MODE_LINEAR_MIPMAP_NEAREST>(p); }
+__global__ void VirtualTextureGradKernelLinearMipmapLinear         (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<float, false, TEX_MODE_LINEAR_MIPMAP_LINEAR>(p); }
+__global__ void VirtualTextureGradKernelLinearMipmapNearestBO      (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<float, true,  TEX_MODE_LINEAR_MIPMAP_NEAREST>(p); }
+__global__ void VirtualTextureGradKernelLinearMipmapLinearBO       (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<float, true,  TEX_MODE_LINEAR_MIPMAP_LINEAR>(p); }
 __global__ void VirtualTextureGradKernelNearestHalf                (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<half, false, TEX_MODE_NEAREST>(p); }
 __global__ void VirtualTextureGradKernelLinearHalf                 (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<half, false, TEX_MODE_LINEAR>(p); }
 __global__ void VirtualTextureGradKernelLinearMipmapNearestHalf    (const VirtualTextureKernelParams p) { VirtualTextureGradKernelTemplate<half, false, TEX_MODE_LINEAR_MIPMAP_NEAREST>(p); }
@@ -1114,7 +1111,9 @@ static __forceinline__ __device__ void VirtualTextureMipmapTemplate(const Virtua
 
     for (int i=0; i < p.channels; i += C)
     {
-        T grad = zero_value<T>();
+        T texel = zero_value<T>();
+        bool all_true = true;
+        bool all_false = true;
         for (int j = 0; j < 4; j++)
         {
             int px_in = px*2 + offset_x[j];
@@ -1126,11 +1125,18 @@ static __forceinline__ __device__ void VirtualTextureMipmapTemplate(const Virtua
             int page_index_in = pi_tc_in.x;
             int tc_in = pi_tc_in.y;
             tc_in *= p.channels;
-            const value_type* pIn = (value_type*)p.tex[page_index_in] + tc_in;
-
-            grad += *((const T*)&pIn[i]);
+            if (p.tex[page_index_in] != NULL) {
+                all_false = false;
+            } else {
+                all_true = false;
+            }
+            if (p.tex[page_index_in] != NULL)
+            {
+                const value_type* pIn = (value_type*)p.tex[page_index_in] + tc_in;
+                texel += *((const T*)&pIn[i]);
+            }
         }
-        *((T*)&pOut[i]) = grad * cast<T>(0.25f);
+        *((T*)&pOut[i]) = texel * cast<T>(0.25f);
     }
 
 }
@@ -1159,7 +1165,7 @@ static __forceinline__ __device__ void VirtualTextureMipGradKernelTemplate(const
     if (C == 4) c >>= 2;
 
     // Dynamically allocated shared memory for holding a texel.
-    extern __shared__ value_type s_texelAccum[];
+    extern __shared__ float s_texelAccum[];
     int sharedOfs = threadIdx.x + threadIdx.y * blockDim.x;
     int sharedStride = blockDim.x * blockDim.y;
 #   define TEXEL_ACCUM(_i) (s_texelAccum + (sharedOfs + (_i) * sharedStride))
@@ -1170,13 +1176,18 @@ static __forceinline__ __device__ void VirtualTextureMipGradKernelTemplate(const
         {
             // Clear the texel.
             for (int i=0; i < p.channels; i++)
-                *TEXEL_ACCUM(i) = cast<value_type>(0.f);
+                *TEXEL_ACCUM(i) = 0.f;
 
             // Calculate pixel position.
             int px = base_px + pixel_x;
             int py = base_py + pixel_y;
             int pz = blockIdx.z;
             if (px >= p.texWidth || py >= p.texHeight)
+                continue;
+            int2 sz = mipLevelSize(p, 0);
+            int2 pi_tc = indexPage(px, py, sz.x, sz.y, p.page_size_x, p.page_size_y);
+            int pi = pi_tc.x; int tc = pi_tc.y;
+            if (p.gradTex[0][pi] == NULL)
                 continue;
                 
             // Track texel position and accumulation weight over the mip stack.
@@ -1185,7 +1196,6 @@ static __forceinline__ __device__ void VirtualTextureMipGradKernelTemplate(const
             float w = 1.f;
 
             // Pull gradients from all levels.
-            int2 sz = mipLevelSize(p, 0); // Previous level size.
             for (int level=1; level <= p.mipLevelMax; level++)
             {
                 // Weight decay depends on previous level size.
@@ -1199,16 +1209,23 @@ static __forceinline__ __device__ void VirtualTextureMipGradKernelTemplate(const
 
                 int2 pi_tc = indexPage(x, y, sz.x, sz.y, p.page_size_x, p.page_size_y);
                 int pi = pi_tc.x; int tc = pi_tc.y;
+
+                if (p.gradTex[level][pi] == NULL)
+                    continue;
                 
                 T* pIn = (T*)((value_type*)p.gradTex[level][pi] + tc * p.channels);
                 for (int i=0; i < c; i++)
-                    accum_from_mem(TEXEL_ACCUM(i * C), sharedStride, pIn[i], cast<value_type>(w));
+                {
+                    if constexpr (C == 1)
+                        accum_from_mem(TEXEL_ACCUM(i * C), sharedStride, cast<float>(pIn[i]), w);
+                    else if constexpr (C == 2)
+                        accum_from_mem(TEXEL_ACCUM(i * C), sharedStride, cast<float2>(pIn[i]), w);
+                    else if constexpr (C == 4)
+                        accum_from_mem(TEXEL_ACCUM(i * C), sharedStride, cast<float4>(pIn[i]), w);
+                }
             }
 
             // Add to main texture gradients.
-            sz = mipLevelSize(p, 0);
-            int2 pi_tc = indexPage(px, py, sz.x, sz.y, p.page_size_x, p.page_size_y);
-            int pi = pi_tc.x; int tc = pi_tc.y;
             T* pOut = (T*)((value_type*)p.gradTex[0][pi] + tc * p.channels);
             for (int i=0; i < c; i++)
                 accum_to_mem(pOut[i], TEXEL_ACCUM(i * C), sharedStride);
@@ -1220,3 +1237,6 @@ static __forceinline__ __device__ void VirtualTextureMipGradKernelTemplate(const
 __global__ void VirtualTextureMipGradKernel1(const VirtualTextureKernelParams p, int pixel_num_x, int pixel_num_y) { VirtualTextureMipGradKernelTemplate<float,  1>(p, pixel_num_x, pixel_num_y); }
 __global__ void VirtualTextureMipGradKernel2(const VirtualTextureKernelParams p, int pixel_num_x, int pixel_num_y) { VirtualTextureMipGradKernelTemplate<float2, 2>(p, pixel_num_x, pixel_num_y); }
 __global__ void VirtualTextureMipGradKernel4(const VirtualTextureKernelParams p, int pixel_num_x, int pixel_num_y) { VirtualTextureMipGradKernelTemplate<float4, 4>(p, pixel_num_x, pixel_num_y); }
+__global__ void VirtualTextureMipGradKernelHalf1(const VirtualTextureKernelParams p, int pixel_num_x, int pixel_num_y) { VirtualTextureMipGradKernelTemplate<half,  1>(p, pixel_num_x, pixel_num_y); }
+__global__ void VirtualTextureMipGradKernelHalf2(const VirtualTextureKernelParams p, int pixel_num_x, int pixel_num_y) { VirtualTextureMipGradKernelTemplate<half2, 2>(p, pixel_num_x, pixel_num_y); }
+__global__ void VirtualTextureMipGradKernelHalf4(const VirtualTextureKernelParams p, int pixel_num_x, int pixel_num_y) { VirtualTextureMipGradKernelTemplate<half4, 4>(p, pixel_num_x, pixel_num_y); }

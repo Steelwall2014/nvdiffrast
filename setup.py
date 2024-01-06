@@ -26,6 +26,7 @@ setuptools.setup(
     package_data={
         'nvdiffrast': [
             'common/*.h',
+            'common/*.hpp',
             'common/*.inl',
             'common/*.cu',
             'common/*.cpp',
@@ -39,7 +40,7 @@ setuptools.setup(
             'torch/*.inl',
             'torch/*.cpp',
             'tensorflow/*.cu',
-        ] + (['lib/*.lib'] if os.name == 'nt' else [])
+        ] + (['lib/*.lib'] if os.name == 'nt' else ['lib/*.a'])
     },
     include_package_data=True,
     install_requires=['numpy'],  # note: can't require torch here as it will install torch even for a TensorFlow container

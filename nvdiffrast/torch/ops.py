@@ -24,6 +24,8 @@ def _get_plugin(gl=False):
     # Return cached plugin if already loaded.
     if _cached_plugin.get(gl, None) is not None:
         return _cached_plugin[gl]
+    
+    include_dir = [os.path.dirname(__file__) + "/../lib"]
 
     # Make sure we can find the necessary compiler and libary binaries.
     if os.name == 'nt':
@@ -128,7 +130,7 @@ def _get_plugin(gl=False):
 
     # Compile and load.
     source_paths = [os.path.join(os.path.dirname(__file__), fn) for fn in source_files]
-    torch.utils.cpp_extension.load(name=plugin_name, sources=source_paths, extra_cflags=opts, extra_cuda_cflags=opts+['-lineinfo', '-G', '-g'], extra_ldflags=ldflags, with_cuda=True, verbose=True)
+    torch.utils.cpp_extension.load(name=plugin_name, sources=source_paths, extra_cflags=opts, extra_cuda_cflags=opts+['-lineinfo', '-G', '-g'], extra_ldflags=ldflags, extra_include_paths=include_dir, with_cuda=True, verbose=True)
 
     # Import, cache, and return the compiled module.
     _cached_plugin[gl] = importlib.import_module(plugin_name)

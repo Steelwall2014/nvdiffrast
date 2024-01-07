@@ -49,7 +49,7 @@ def _get_plugin(gl=False):
         lib_dir = os.path.dirname(__file__) + "/../lib"
 
     # Compiler options.
-    opts = ['-DNVDR_TORCH']
+    opts = ['-DNVDR_TORCH', "-DENABLE_HALF_TEXTURE"]
 
     # Linker options for the GL-interfacing plugin.
     ldflags = []
@@ -60,7 +60,7 @@ def _get_plugin(gl=False):
             libs = ['gdi32', 'opengl32', 'user32', 'setgpu']
             ldflags = ['/LIBPATH:' + lib_dir] + ['/DEFAULTLIB:' + x for x in libs]
     if os.name == 'posix':
-        ldflags += ['-L' + lib_dir] + ['-lmetis', '-ltbb']
+        ldflags += ['-L' + lib_dir] + ['-lmetis']
     elif os.name == 'nt':
         ldflags += ['/DEFAULTLIB:metis']
 

@@ -8,7 +8,9 @@
 
 #pragma once
 #include <cuda.h>
+#ifdef ENABLE_HALF_TEXTURE
 #include <cuda_fp16.h>
+#endif
 #include <vector_types.h>
 #include <vector_functions.h>
 #include <stdint.h>
@@ -32,60 +34,18 @@ dim3 getLaunchGridSize(dim3 blockSize, int width, int height, int depth);
 //------------------------------------------------------------------------
 // The rest is CUDA device code specific stuff.
 
-#ifndef __CUDACC__
-inline half __hadd(half a, half b)
-{
-    return __float2half(__half2float(a) + __half2float(b));
-}
-inline half __hsub(half a, half b)
-{
-    return __float2half(__half2float(a) - __half2float(b));
-}
-inline half __hmul(half a, half b)
-{
-    return __float2half(__half2float(a) * __half2float(b));
-}
-inline half2 __hadd2(half2 a, half2 b)
-{
-    return half2(__float2half(__half2float(a.x) + __half2float(b.x)), __float2half(__half2float(a.y) + __half2float(b.y)));
-}
-inline half2 __hsub2(half2 a, half2 b)
-{
-    return half2(__float2half(__half2float(a.x) - __half2float(b.x)), __float2half(__half2float(a.y) - __half2float(b.y)));
-}
-inline half2 __hmul2(half2 a, half2 b)
-{
-    return half2(__float2half(__half2float(a.x) * __half2float(b.x)), __float2half(__half2float(a.y) * __half2float(b.y)));
-}
-#endif
-
 //------------------------------------------------------------------------
 // Helpers for CUDA vector types.
 
-struct alignas(4) half4 {
-    half x, y, z, w;
-    __CUDA_HOST__ __CUDA_DEVICE__ half4() = default;
-    __CUDA_HOST__ __CUDA_DEVICE__ half4(half x, half y, half z, half w) { this->x=x; this->y=y; this->z=z; this->w=w; }
-};
-
 template<typename T> struct value_type_traits { };
-template<> struct value_type_traits<half> { using type = half; };
-template<> struct value_type_traits<half2> { using type = half; };
-template<> struct value_type_traits<half4> { using type = half; };
 template<> struct value_type_traits<float> { using type = float; };
 template<> struct value_type_traits<float2> { using type = float; };
 template<> struct value_type_traits<float4> { using type = float; };
 
 template<typename T, typename U> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ T cast(U x) { return (T)x; }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half cast(float x) { return __float2half(x); }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float cast(half x) { return __half2float(x); }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half2 cast(float x) { return half2(cast<half>(x), cast<half>(x)); }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4 cast(float x) { return half4(cast<half>(x), cast<half>(x), cast<half>(x), cast<half>(x)); }
 template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float cast(float x) { return x; }
 template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float2 cast(float x) { return make_float2(x, x); }
 template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float4 cast(float x) { return make_float4(x, x, x, x); }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float2 cast(half2 x) { return make_float2(cast<float>(x.x), cast<float>(x.y)); }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float4 cast(half4 x) { return make_float4(cast<float>(x.x), cast<float>(x.y), cast<float>(x.z), cast<float>(x.w)); }
 
 static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float2&   operator*=  (float2& a, const float2& b)       { a.x *= b.x; a.y *= b.y; return a; }
 static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float2&   operator+=  (float2& a, const float2& b)       { a.x += b.x; a.y += b.y; return a; }
@@ -228,26 +188,11 @@ static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ uint4     operator-   (const uint4& 
 static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ uint4     operator*   (unsigned int a, const uint4& b)   { return make_uint4(a * b.x, a * b.y, a * b.z, a * b.w); }
 static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ uint4     operator+   (unsigned int a, const uint4& b)   { return make_uint4(a + b.x, a + b.y, a + b.z, a + b.w); }
 static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ uint4     operator-   (unsigned int a, const uint4& b)   { return make_uint4(a - b.x, a - b.y, a - b.z, a - b.w); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half      operator+   (const half &lh, const half &rh)   { return __hadd(lh, rh); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half      operator-   (const half &lh, const half &rh)   { return __hsub(lh, rh); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half      operator*   (const half &lh, const half &rh)   { return __hmul(lh, rh); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half      operator+=  (const half &lh, const half &rh)   { return __hsub(lh, rh); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half&     operator+=  (half &lh, const half &rh)         { lh = __hadd(lh, rh); return lh; }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half2     operator*   (const half2 &lh, const half2 &rh) { return __hmul2(lh, rh); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half2&    operator+=  (half2 &lh, const half2 &rh)       { lh = __hadd2(lh, rh); return lh; }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4     operator+   (const half4& a, const half4& b)   { return half4(a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4     operator*   (const half4& a, float b)          { return half4(a.x*cast<half>(b), a.y*cast<half>(b), a.z*cast<half>(b), a.w*cast<half>(b)); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4     operator*   (const half4& a, const half4& b)   { return half4(a.x*b.x, a.y*b.y, a.z*b.z, a.w*b.w); }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4&    operator+=  (half4& a, const half4& b)         { a = a + b; return a; }
-static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4&    operator*=  (half4& a, float b)                { a = a * b; return a; }
 
 template<class T> static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ T zero_value(void);
 template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float  zero_value<float> (void)                      { return 0.f; }
 template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float2 zero_value<float2>(void)                      { return make_float2(0.f, 0.f); }
 template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float4 zero_value<float4>(void)                      { return make_float4(0.f, 0.f, 0.f, 0.f); }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half   zero_value<half> (void)                       { return cast<half>(0.f); }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half2  zero_value<half2>(void)                       { return cast<half2>(0.f); }
-template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4  zero_value<half4>(void)                       { return cast<half4>(0.f); }
 static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float3 make_float3(const float2& a, float b)             { return make_float3(a.x, a.y, b); }
 static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float4 make_float4(const float3& a, float b)             { return make_float4(a.x, a.y, a.z, b); }
 static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float4 make_float4(const float2& a, const float2& b)     { return make_float4(a.x, a.y, b.x, b.y); }
@@ -330,3 +275,69 @@ template<class T> static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ void swap(T& a, T&
 
 //------------------------------------------------------------------------
 #endif // __CUDACC__
+
+#ifdef ENABLE_HALF_TEXTURE
+
+#ifndef __CUDACC__
+inline half __hadd(half a, half b)
+{
+    return __float2half(__half2float(a) + __half2float(b));
+}
+inline half __hsub(half a, half b)
+{
+    return __float2half(__half2float(a) - __half2float(b));
+}
+inline half __hmul(half a, half b)
+{
+    return __float2half(__half2float(a) * __half2float(b));
+}
+inline half2 __hadd2(half2 a, half2 b)
+{
+    return half2(__float2half(__half2float(a.x) + __half2float(b.x)), __float2half(__half2float(a.y) + __half2float(b.y)));
+}
+inline half2 __hsub2(half2 a, half2 b)
+{
+    return half2(__float2half(__half2float(a.x) - __half2float(b.x)), __float2half(__half2float(a.y) - __half2float(b.y)));
+}
+inline half2 __hmul2(half2 a, half2 b)
+{
+    return half2(__float2half(__half2float(a.x) * __half2float(b.x)), __float2half(__half2float(a.y) * __half2float(b.y)));
+}
+#endif // __CUDACC__
+
+struct alignas(4) half4 {
+    half x, y, z, w;
+    __CUDA_HOST__ __CUDA_DEVICE__ half4() = default;
+    __CUDA_HOST__ __CUDA_DEVICE__ half4(half x, half y, half z, half w) { this->x=x; this->y=y; this->z=z; this->w=w; }
+};
+
+template<> struct value_type_traits<half> { using type = half; };
+template<> struct value_type_traits<half2> { using type = half; };
+template<> struct value_type_traits<half4> { using type = half; };
+
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half cast(float x) { return __float2half(x); }
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float cast(half x) { return __half2float(x); }
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half2 cast(float x) { return half2(cast<half>(x), cast<half>(x)); }
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4 cast(float x) { return half4(cast<half>(x), cast<half>(x), cast<half>(x), cast<half>(x)); }
+
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float2 cast(half2 x) { return make_float2(cast<float>(x.x), cast<float>(x.y)); }
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ float4 cast(half4 x) { return make_float4(cast<float>(x.x), cast<float>(x.y), cast<float>(x.z), cast<float>(x.w)); }
+
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half      operator+   (const half &lh, const half &rh)   { return __hadd(lh, rh); }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half      operator-   (const half &lh, const half &rh)   { return __hsub(lh, rh); }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half      operator*   (const half &lh, const half &rh)   { return __hmul(lh, rh); }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half      operator+=  (const half &lh, const half &rh)   { return __hsub(lh, rh); }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half&     operator+=  (half &lh, const half &rh)         { lh = __hadd(lh, rh); return lh; }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half2     operator*   (const half2 &lh, const half2 &rh) { return __hmul2(lh, rh); }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half2&    operator+=  (half2 &lh, const half2 &rh)       { lh = __hadd2(lh, rh); return lh; }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4     operator+   (const half4& a, const half4& b)   { return half4(a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w); }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4     operator*   (const half4& a, float b)          { return half4(a.x*cast<half>(b), a.y*cast<half>(b), a.z*cast<half>(b), a.w*cast<half>(b)); }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4     operator*   (const half4& a, const half4& b)   { return half4(a.x*b.x, a.y*b.y, a.z*b.z, a.w*b.w); }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4&    operator+=  (half4& a, const half4& b)         { a = a + b; return a; }
+static __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4&    operator*=  (half4& a, float b)                { a = a * b; return a; }
+
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half   zero_value<half> (void)                       { return cast<half>(0.f); }
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half2  zero_value<half2>(void)                       { return cast<half2>(0.f); }
+template<> __CUDA_DEVICE__ __CUDA_FORCEINLINE__ half4  zero_value<half4>(void)                       { return cast<half4>(0.f); }
+
+#endif // ENABLE_HALF_TEXTURE

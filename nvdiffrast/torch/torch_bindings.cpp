@@ -57,7 +57,7 @@ OP_RETURN_W         virtual_texture_construct_mip               (int max_mip_lev
 OP_RETURN_W         virtual_texture_construct_mip_cuda          (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
 torch::Tensor       virtual_geometry_frustum_cull               (torch::Tensor AABBs, torch::Tensor Frustums);
 void                virtual_geometry_accumulate_grad            (std::vector<torch::Tensor> Attribute, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices);
-VirtualGeometryConstructResult virtual_geometry_construct       (torch::Tensor Positions, torch::Tensor Indices, int MaxPartitionSize, std::vector<torch::Tensor> Attributes);
+VirtualGeometryConstructResult virtual_geometry_construct       (torch::Tensor Positions, torch::Tensor Indices, int MaxPartitionSize, std::vector<torch::Tensor> Attributes, torch::Device Device);
 //------------------------------------------------------------------------
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

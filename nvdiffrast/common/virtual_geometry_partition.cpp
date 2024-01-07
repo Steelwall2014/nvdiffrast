@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <execution>
 #include <float.h>
 #include <functional>
 #include <iostream>
@@ -7,7 +6,7 @@
 #include <mutex>
 #include <queue>
 #include "virtual_geometry_partition.h"
-#include "BS_thread_pool.hpp"
+#include "parallel.hpp"
 
 using std::vector;
 using std::set;
@@ -361,23 +360,6 @@ void GraphPartitioner::BisectGraph(GraphData* Graph, GraphData* ChildGraphs[2])
 
         }
     }
-}
-
-void ParallelFor(idx_t Num, int NumThreads, function<void(idx_t)> Func)
-{
-    if (Num < NumThreads)
-        NumThreads = Num;
-    idx_t num_per_thread = Num / NumThreads;
-    vector<std::pair<idx_t, idx_t>> indexes(NumThreads);
-    for (int i = 0; i < NumThreads; i++)
-        indexes[i] = {i*num_per_thread, (i+1)*num_per_thread};
-    if (Num % NumThreads != 0)
-        indexes[NumThreads-1].second = Num;
-    std::for_each(std::execution::par, indexes.begin(), indexes.end(), 
-    [&](std::pair<idx_t, idx_t> range) {
-        for (idx_t i = range.first; i < range.second; i++)
-            Func(i);
-    });
 }
 
 std::vector<std::vector<idx_t>> ConnectedComponents(vector<idx_t>& Adjacency, vector<idx_t>& AdjacencyOffset)

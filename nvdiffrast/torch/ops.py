@@ -49,7 +49,7 @@ def _get_plugin(gl=False):
         lib_dir = os.path.dirname(__file__) + "/../lib"
 
     # Compiler options.
-    opts = ['-DNVDR_TORCH']
+    opts = ['-DNVDR_TORCH', "-DENABLE_HALF_TEXTURE"]
 
     # Linker options for the GL-interfacing plugin.
     ldflags = []
@@ -60,7 +60,7 @@ def _get_plugin(gl=False):
             libs = ['gdi32', 'opengl32', 'user32', 'setgpu']
             ldflags = ['/LIBPATH:' + lib_dir] + ['/DEFAULTLIB:' + x for x in libs]
     if os.name == 'posix':
-        ldflags += ['-L' + lib_dir] + ['-lmetis', '-ltbb']
+        ldflags += ['-L' + lib_dir] + ['-lmetis']
     elif os.name == 'nt':
         ldflags += ['/DEFAULTLIB:metis']
 
@@ -979,9 +979,13 @@ def virtual_texture_construct_mip(texture_depth, texture_height, texture_width, 
 # Virtual Geometry Operations.
 #----------------------------------------------------------------------------
 
-def virtual_geometry_construct(pos, pos_idx, attributes=[], max_partition_size=16384):
+def virtual_geometry_construct(pos: torch.Tensor, pos_idx, attributes=[], max_partition_size=16384, device=None):
     with torch.no_grad():
-        return _get_plugin().virtual_geometry_construct(pos, pos_idx, max_partition_size, attributes)
+        if device is None:
+            device = pos.device
+        elif isinstance(device, str):
+            device = torch.device(device)
+        return _get_plugin().virtual_geometry_construct(pos, pos_idx, max_partition_size, attributes, device)
 
 def virtual_geometry_frustum_cull(AABBs: torch.Tensor, frustums: torch.Tensor):
     with torch.no_grad():

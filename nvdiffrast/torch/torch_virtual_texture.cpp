@@ -3,10 +3,10 @@
 #include "torch_types.h"
 #include "../common/common.h"
 #include "../common/virtual_texture.h"
+#include "../common/parallel.hpp"
 #include <cuda_runtime.h>
 #include <torch/extension.h>
 #include <type_traits>
-#include <execution>
 
 //------------------------------------------------------------------------
 // Kernel prototypes.
@@ -312,7 +312,11 @@ std::vector<torch::Tensor> check_and_get_type(std::vector<std::vector<torch::Ten
     }
     if (!cuda_pages.empty())
     {
+#ifdef ENABLE_HALF_TEXTURE
         NVDR_CHECK_F16F32(cuda_pages);
+#else
+        NVDR_CHECK_F32(cuda_pages);
+#endif // ENABLE_HALF_TEXTURE
         NVDR_CHECK_CONTIGUOUS(cuda_pages);
         dtype = cuda_pages[0].dtype().toScalarType();
     }
@@ -951,22 +955,6 @@ static void VirtualTextureMipmapTemplate_CPU(const VirtualTextureMipmapParams& p
 void VirtualTextureMipmapKernel1_CPU                    (const VirtualTextureMipmapParams& p, int px, int py) { VirtualTextureMipmapTemplate_CPU<float,  1>(p, px, py); }
 void VirtualTextureMipmapKernel2_CPU                    (const VirtualTextureMipmapParams& p, int px, int py) { VirtualTextureMipmapTemplate_CPU<float2,  2>(p, px, py); }
 void VirtualTextureMipmapKernel4_CPU                    (const VirtualTextureMipmapParams& p, int px, int py) { VirtualTextureMipmapTemplate_CPU<float4,  4>(p, px, py); }
-static void ParallelFor(int Num, int NumThreads, std::function<void(int)> Func)
-{
-    if (Num < NumThreads)
-        NumThreads = Num;
-    int num_per_thread = Num / NumThreads;
-    std::vector<std::pair<int, int>> indexes(NumThreads);
-    for (int i = 0; i < NumThreads; i++)
-        indexes[i] = {i*num_per_thread, (i+1)*num_per_thread};
-    if (Num % NumThreads != 0)
-        indexes[NumThreads-1].second = Num;
-    std::for_each(std::execution::par, indexes.begin(), indexes.end(), 
-    [&](std::pair<int, int> range) {
-        for (int i = range.first; i < range.second; i++)
-            Func(i);
-    });
-}
 
 std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages)
 {

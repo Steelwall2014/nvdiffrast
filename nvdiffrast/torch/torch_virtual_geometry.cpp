@@ -41,7 +41,8 @@ VirtualGeometryConstructResult virtual_geometry_construct(
     torch::Tensor Positions,  
     torch::Tensor Indices,
     int MaxPartitionSize,
-    std::vector<torch::Tensor> Attributes)
+    std::vector<torch::Tensor> Attributes,
+    torch::Device Device)
 {
     NVDR_CHECK(Positions.sizes().size() == 2 && Positions.size(0) > 0 && Positions.size(1) == 3, "Positions must have shape [>0, 3]");
     NVDR_CHECK(Indices.sizes().size() == 2 && Indices.size(0) > 0 && Indices.size(1) == 3, "Indices must have shape [>0, 3]");
@@ -75,18 +76,18 @@ VirtualGeometryConstructResult virtual_geometry_construct(
 
         uint32_t NumTriangles = Cluster.Indices.size() / 3;
         torch::TensorOptions Options = torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-        OutCluster.Indices = torch::from_blob(Cluster.Indices.data(), {NumTriangles, 3}, Options).cuda();
+        OutCluster.Indices = torch::from_blob(Cluster.Indices.data(), {NumTriangles, 3}, Options).clone().to(Device, true);
         Options = torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU);
-        OutCluster.OldTriangleIndices = torch::from_blob(Cluster.OldTriangleIndices.data(), {NumTriangles}, Options).cuda();
+        OutCluster.OldTriangleIndices = torch::from_blob(Cluster.OldTriangleIndices.data(), {NumTriangles}, Options).clone().to(Device, true);
 
-        torch::Tensor OldIndices = CudaIndices.index_select(0, OutCluster.OldTriangleIndices);    // [NumTriangles, 3]
+        torch::Tensor OldIndices = CudaIndices.index_select(0, OutCluster.OldTriangleIndices.cuda());    // [NumTriangles, 3]
 
         Options = torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA);
         torch::Tensor OldVertIndices = torch::zeros({Cluster.NumVertices}, Options).index_put({OutCluster.Indices}, OldIndices);    // [NumVertices]
-        OutCluster.Positions = CudaPositions.index_select(0, OldVertIndices);
+        OutCluster.Positions = CudaPositions.index_select(0, OldVertIndices).to(Device, true);
         OutCluster.Attributes.resize(CudaAttributes.size());
         for (int i = 0; i < CudaAttributes.size(); i++)
-            OutCluster.Attributes[i] = CudaAttributes[i].index_select(0, OldVertIndices);
+            OutCluster.Attributes[i] = CudaAttributes[i].index_select(0, OldVertIndices).to(Device, true);
         OutCluster.ClusterIndex = ClusterIndex;
         Bar.update(float(ClusterIndex+1) / Result.Clusters.size());
     }

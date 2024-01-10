@@ -352,7 +352,7 @@ __global__ void VirtualGeometryRasterizeGradKernelDb(const VirtualGeometryRaster
 
 //------------------------------------------------------------------------
 // Accumulate gradients kernel.
-__global__ void VirtualGeometryAccumulateGradKernel(const VirtualGeometryAccumulateGradParams p)
+__global__ void VirtualGeometryAggregateGradKernel(const VirtualGeometryAccumulateGradParams p)
 {
     int px = blockIdx.x * blockDim.x + threadIdx.x;
     int py = blockIdx.y * blockDim.y + threadIdx.y;

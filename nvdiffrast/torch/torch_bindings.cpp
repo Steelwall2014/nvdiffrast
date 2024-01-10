@@ -56,7 +56,7 @@ OP_RETURN_WTTT      virtual_texture_grad_linear_mipmap_linear   (torch::Tensor u
 OP_RETURN_W         virtual_texture_construct_mip               (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
 OP_RETURN_W         virtual_texture_construct_mip_cuda          (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
 torch::Tensor       virtual_geometry_frustum_cull               (torch::Tensor AABBs, torch::Tensor Frustums);
-void                virtual_geometry_accumulate_grad            (std::vector<torch::Tensor> Attribute, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices);
+void                virtual_geometry_aggregate_grad             (std::vector<torch::Tensor> ClustersGradients, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices);
 VirtualGeometryConstructResult virtual_geometry_construct       (torch::Tensor Positions, torch::Tensor Indices, int MaxPartitionSize, std::vector<torch::Tensor> Attributes, torch::Device Device);
 //------------------------------------------------------------------------
 
@@ -109,7 +109,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("virtual_texture_construct_mip_cuda",         &virtual_texture_construct_mip_cuda,"virtual texture mipmap construction");
     m.def("virtual_geometry_construct",                 &virtual_geometry_construct,        "virtual geometry construction");
     m.def("virtual_geometry_frustum_cull",              &virtual_geometry_frustum_cull,     "virtual geometry frustum cull");
-    m.def("virtual_geometry_accumulate_grad",           &virtual_geometry_accumulate_grad,  "virtual geometry accumulate gradients");
+    m.def("virtual_geometry_aggregate_grad",           &virtual_geometry_aggregate_grad,  "virtual geometry aggregate gradients");
     
 }
 

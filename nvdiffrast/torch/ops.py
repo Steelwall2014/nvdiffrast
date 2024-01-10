@@ -991,6 +991,6 @@ def virtual_geometry_frustum_cull(AABBs: torch.Tensor, frustums: torch.Tensor):
     with torch.no_grad():
         return _get_plugin().virtual_geometry_frustum_cull(AABBs, frustums)
 
-def virtual_geometry_accumulate_grad(attr, matching_verts):
+def virtual_geometry_aggregate_grad(attr_grads, matching_verts):
     with torch.no_grad():
-        _get_plugin().virtual_geometry_accumulate_grad(attr, matching_verts)
+        _get_plugin().virtual_geometry_aggregate_grad(attr_grads, matching_verts)

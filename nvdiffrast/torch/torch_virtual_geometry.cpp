@@ -5,10 +5,11 @@
 #include "../common/framework.h"
 #include "../common/virtual_geometry_partition.h"
 #include "../common/virtual_geometry.h"
+#include "../common/parallel.hpp"
 #include "torch_types.h"
 
 void VirtualGeometryFrustumCullKernal(VirtualGeometryFrustumCullParams p);
-void VirtualGeometryAccumulateGradKernel(VirtualGeometryAccumulateGradParams p);
+void VirtualGeometryAggregateGradKernel(VirtualGeometryAccumulateGradParams p);
 
 struct ProgressBar
 {
@@ -128,35 +129,63 @@ torch::Tensor virtual_geometry_frustum_cull(torch::Tensor AABBs, torch::Tensor F
     return Culled;
 }
 
-void virtual_geometry_accumulate_grad(std::vector<torch::Tensor> Clusters, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices)
+void virtual_geometry_aggregate_grad(std::vector<torch::Tensor> ClustersGradients, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices)
 {
     std::vector<float*> cuda_grads;
     std::vector<float*> cpu_grads;
     std::optional<torch::Tensor> cuda_tensor = std::nullopt;
     std::optional<torch::Tensor> cpu_tensor = std::nullopt;
 
-    for (auto& cluster : Clusters)
+    for (auto& grad : ClustersGradients)
     {
-        NVDR_CHECK(cluster.sizes().size() == 2 && cluster.size(0) > 0 && cluster.size(1) > 0, "The attribute of each cluster must have shape [>0, >0]");
-        torch::Tensor grad = cluster.grad();
         bool has_grad = grad.defined() && grad.nbytes();
         if (!has_grad)
         {
             cpu_grads.push_back(NULL);
+            cuda_grads.push_back(NULL);
         }
         else 
         {
-            if (at::cuda::check_device({cluster}))
+            NVDR_CHECK(grad.sizes().size() == 2 && grad.size(0) > 0 && grad.size(1) > 0, "The attribute of each grad must have shape [>0, >0]");
+            if (at::cuda::check_device({grad}))
             {
-                cuda_tensor = cluster;
+                cuda_tensor = grad;
                 cuda_grads.push_back(grad.data_ptr<float>());
+                cpu_grads.push_back(NULL);
             }
             else 
             {
-                cpu_tensor = cluster;
+                cpu_tensor = grad;
                 cpu_grads.push_back(grad.data_ptr<float>());
+                cuda_grads.push_back(NULL);
             }
         }
+    }
+
+    for (auto& Group : MatchingVertices)
+    {
+        bool all_cuda = true;
+        bool all_cpu = true;
+        bool all_defined = true;
+        bool all_not_defined = true;
+        for (auto& Vertex : Group)
+        {
+            int cluster_index = std::get<0>(Vertex);   // cluster index
+            if (ClustersGradients[cluster_index].defined() && ClustersGradients[cluster_index].nbytes())
+            {
+                all_not_defined = false;
+                if (at::cuda::check_device({ClustersGradients[cluster_index]}))
+                    all_cpu = false;
+                else
+                    all_cuda = false;
+            }
+            else 
+            {
+                all_defined = false;
+            }
+        }
+        NVDR_CHECK(all_defined || all_not_defined, "The gradients of a group of matching vertices must be either all defined or all not defined");
+        NVDR_CHECK(all_cuda || all_cpu, "All gradients of a group of matching vertices must be on the same device");
     }
 
     if (cuda_tensor)
@@ -192,17 +221,20 @@ void virtual_geometry_accumulate_grad(std::vector<torch::Tensor> Clusters, std::
         dim3 gridSize = dim3(16, std::ceil(p.numGroups / 512.0), 1);
 
         void* args[] = {&p};
-        NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel((void*)VirtualGeometryAccumulateGradKernel, gridSize, blockSize, args, 0, stream));
+        NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel((void*)VirtualGeometryAggregateGradKernel, gridSize, blockSize, args, 0, stream));
 
     }
 
     if (cpu_tensor)
     {
-        for (auto& Group : MatchingVertices)
-        {
+        int thread_num = 1;
+        if (std::thread::hardware_concurrency() > 0)
+            thread_num = std::thread::hardware_concurrency();
+        ParallelFor(MatchingVertices.size(), thread_num, [&](size_t i) { 
+            auto& Group = MatchingVertices[i];
             int numVerts = Group.size();
             int numAttr = cpu_tensor->size(1);
-            for (int j = 0; j < numVerts; j++)
+            for (int j = 0; j < numAttr; j++)
             {
                 float grad = 0.f;
                 for (int i = 0; i < numVerts; i++)
@@ -220,8 +252,7 @@ void virtual_geometry_accumulate_grad(std::vector<torch::Tensor> Clusters, std::
                         cpu_grads[clusterIndex][vertexIndex * numAttr + j] = grad;
                 }
             }
-        }
-
+        });
     }
 
 }

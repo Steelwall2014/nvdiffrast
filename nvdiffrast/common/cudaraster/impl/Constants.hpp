@@ -27,7 +27,7 @@
 #define CR_BIN_SEG_LOG2         9       // 32-bit entries.
 #define CR_TILE_SEG_LOG2        5       // 32-bit entries.
 
-#define CR_MAXSUBTRIS_LOG2      24      // Triangle structs. Dictated by CoarseRaster.
+#define CR_MAXSUBTRIS_LOG2      28      // Triangle structs. Dictated by CoarseRaster.
 #define CR_COARSE_QUEUE_LOG2    10      // Triangles.
 
 #define CR_SETUP_WARPS          2

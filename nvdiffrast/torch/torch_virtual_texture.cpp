@@ -405,7 +405,7 @@ torch::Tensor virtual_texture_fwd_mip(
     p.mipLevelBias = (p.enableMip && has_mip_level_bias) ? mip_level_bias.data_ptr<float>() : NULL;
 
     // Allocate output tensor.
-    torch::ScalarType dtype;
+    torch::ScalarType dtype = torch::kFloat32;  // Default to float32.
     bool has_cuda_pages = !check_and_get_type(pages, dtype).empty();
     torch::TensorOptions opts = torch::TensorOptions().dtype(dtype).device(torch::kCUDA);
     torch::Tensor out = torch::zeros({p.n, p.imgHeight, p.imgWidth, p.channels}, opts);
@@ -575,7 +575,7 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
     NVDR_CHECK_DEVICE(uv);
     NVDR_CHECK_CONTIGUOUS(uv);
     NVDR_CHECK_F32(uv);
-    torch::ScalarType dtype;
+    torch::ScalarType dtype = torch::kFloat32;  // Default to float32.
     bool has_cuda_pages = !check_and_get_type(pages, dtype).empty();
     if (p.enableMip)
     {

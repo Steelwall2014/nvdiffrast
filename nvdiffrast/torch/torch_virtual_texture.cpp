@@ -428,7 +428,8 @@ torch::Tensor virtual_texture_fwd_mip(
         for (int i=0; i <= p.mipLevelMax; i++)
         {
             for (int j=0; j < pages[i].size(); j++)
-                NVDR_CHECK(!((uintptr_t)p.tex[i][j] & 15), "tex or mip input tensor not aligned to float4");
+                if (pages[i][j].defined() && pages[i][j].nbytes() && at::cuda::check_device({pages[i][j]}))
+                    NVDR_CHECK(!((uintptr_t)pages[i][j].data_ptr() & 15), "tex or mip input tensor not aligned to float4");
         }
         NVDR_CHECK(!((uintptr_t)p.out    & 15), "out output tensor not aligned to float4");
     }
@@ -437,7 +438,8 @@ torch::Tensor virtual_texture_fwd_mip(
         for (int i=0; i <= p.mipLevelMax; i++)
         {
             for (int j=0; j < pages[i].size(); j++)
-                NVDR_CHECK(!((uintptr_t)p.tex[i][j] & 7), "tex or mip input tensor not aligned to float2");
+                if (pages[i][j].defined() && pages[i][j].nbytes() && at::cuda::check_device({pages[i][j]}))
+                    NVDR_CHECK(!((uintptr_t)pages[i][j].data_ptr() & 7), "tex or mip input tensor not aligned to float2");
         }
         NVDR_CHECK(!((uintptr_t)p.out    & 7), "out output tensor not aligned to float2");
     }
@@ -678,7 +680,8 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
         for (int i=0; i <= p.mipLevelMax; i++)
         {
             for (int j=0; j < pages[i].size(); j++)
-                NVDR_CHECK(!((uintptr_t)p.tex[i][j] & 15), "tex or mip input tensor not aligned to float4");
+                if (pages[i][j].defined() && pages[i][j].nbytes() && at::cuda::check_device({pages[i][j]}))
+                    NVDR_CHECK(!((uintptr_t)pages[i][j].data_ptr() & 15), "tex or mip input tensor not aligned to float4");
         }
         NVDR_CHECK(!((uintptr_t)p.out    & 15), "out output tensor not aligned to float4");
     }
@@ -687,7 +690,8 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
         for (int i=0; i <= p.mipLevelMax; i++)
         {
             for (int j=0; j < pages[i].size(); j++)
-                NVDR_CHECK(!((uintptr_t)p.tex[i][j] & 7), "tex or mip input tensor not aligned to float2");
+                if (pages[i][j].defined() && pages[i][j].nbytes() && at::cuda::check_device({pages[i][j]}))
+                    NVDR_CHECK(!((uintptr_t)pages[i][j].data_ptr() & 7), "tex or mip input tensor not aligned to float2");
         }
         NVDR_CHECK(!((uintptr_t)p.out    & 7), "out output tensor not aligned to float2");
     }

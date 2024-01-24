@@ -800,14 +800,12 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip_cuda(int m
                    pages[i].size(2) == page_size_x && 
                    pages[i].size(3) == texture_channels, "pages[i] must have shape[texture_depth, page_size_y, page_size_x, texture_channels]");
     }
-    std::vector<torch::Tensor> cuda_pages;
-    for (auto& tensor : pages)
-        cuda_pages.push_back(tensor.to(c10::kCUDA, true));
+    torch::ScalarType dtype = torch::kFloat32;  // Default to float32.
+    std::vector<torch::Tensor> cuda_pages = check_and_get_type({pages}, dtype);
     max_mip_level = calculateMaxMipLevel(texture_width, texture_height, max_mip_level);
 
     NVDR_CHECK(!cuda_pages.empty(), "virtual_texture_construct_mip: Pages is empty");
-
-    torch::ScalarType dtype = cuda_pages[0].dtype().toScalarType();
+    NVDR_CHECK(cuda_pages.size() == pages.size(), "virtual_texture_construct_mip: All of the pages must reside in GPU memory");
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(cuda_pages[0]));
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -976,6 +974,7 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
                    pages[i].size(3) == texture_channels, "pages[i] must have shape[texture_depth, page_size_y, page_size_x, texture_channels]");
     }
 
+    NVDR_CHECK_CPU(pages);
     NVDR_CHECK_F32(pages);
     VirtualTextureMipmapParams p = {};
 

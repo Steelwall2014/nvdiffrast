@@ -738,53 +738,53 @@ def antialias_construct_topology_hash(tri):
 # Virtual texture feedback.
 #----------------------------------------------------------------------------
     
+@torch.no_grad()
 def virtual_texture_feedback(texture_depth, texture_height, texture_width, texture_channels, uv, uv_da=None, mip_level_bias=None, mask=None, filter_mode='auto', boundary_mode='wrap', page_size_x=512, page_size_y=512, max_mip_level=None):
-    with torch.no_grad():
-        # Default filter mode.
-        if filter_mode == 'auto':
-            filter_mode = 'linear-mipmap-linear' if (uv_da is not None or mip_level_bias is not None) else 'linear'
+    # Default filter mode.
+    if filter_mode == 'auto':
+        filter_mode = 'linear-mipmap-linear' if (uv_da is not None or mip_level_bias is not None) else 'linear'
 
-        # Check inputs.
-        assert isinstance(uv, torch.Tensor)
-        if 'mipmap' in filter_mode:
-            assert isinstance(uv_da, torch.Tensor) or isinstance(mip_level_bias, torch.Tensor)
+    # Check inputs.
+    assert isinstance(uv, torch.Tensor)
+    if 'mipmap' in filter_mode:
+        assert isinstance(uv_da, torch.Tensor) or isinstance(mip_level_bias, torch.Tensor)
 
-        # Convert filter mode to internal enumeration.
-        filter_mode_dict = {'nearest': 0, 'linear': 1, 'linear-mipmap-nearest': 2, 'linear-mipmap-linear': 3}
-        filter_mode_enum = filter_mode_dict[filter_mode]
+    # Convert filter mode to internal enumeration.
+    filter_mode_dict = {'nearest': 0, 'linear': 1, 'linear-mipmap-nearest': 2, 'linear-mipmap-linear': 3}
+    filter_mode_enum = filter_mode_dict[filter_mode]
 
-        # Convert boundary mode to internal enumeration.
-        boundary_mode_dict = {'cube': 0, 'wrap': 1, 'clamp': 2, 'zero': 3}
-        boundary_mode_enum = boundary_mode_dict[boundary_mode]
+    # Convert boundary mode to internal enumeration.
+    boundary_mode_dict = {'cube': 0, 'wrap': 1, 'clamp': 2, 'zero': 3}
+    boundary_mode_enum = boundary_mode_dict[boundary_mode]
 
-        if mask is None:
-            mask = torch.tensor([])
+    if mask is None:
+        mask = torch.tensor([])
 
-        # Choose stub.
-        if filter_mode == 'linear-mipmap-linear' or filter_mode == 'linear-mipmap-nearest':
-            if max_mip_level is None:
-                max_mip_level = -1
-            else:
-                max_mip_level = int(max_mip_level)
-                assert max_mip_level >= 0
-            empty = torch.tensor([])
-            if uv_da is None:
-                uv_da = empty
-            if mip_level_bias is None:
-                mip_level_bias = empty
-            out = _get_plugin().virtual_texture_feedback_mip(
-                uv, uv_da, mip_level_bias, mask,
-                filter_mode_enum, boundary_mode_enum, 
-                texture_depth, texture_height, texture_width, texture_channels, 
-                page_size_x, page_size_y, max_mip_level)
-            return out
+    # Choose stub.
+    if filter_mode == 'linear-mipmap-linear' or filter_mode == 'linear-mipmap-nearest':
+        if max_mip_level is None:
+            max_mip_level = -1
         else:
-            out = _get_plugin().virtual_texture_feedback(
-                uv, mask, 
-                filter_mode_enum, boundary_mode_enum, 
-                texture_depth, texture_height, texture_width, texture_channels, 
-                page_size_x, page_size_y)
-            return out
+            max_mip_level = int(max_mip_level)
+            assert max_mip_level >= 0
+        empty = torch.tensor([])
+        if uv_da is None:
+            uv_da = empty
+        if mip_level_bias is None:
+            mip_level_bias = empty
+        out = _get_plugin().virtual_texture_feedback_mip(
+            uv, uv_da, mip_level_bias, mask,
+            filter_mode_enum, boundary_mode_enum, 
+            texture_depth, texture_height, texture_width, texture_channels, 
+            page_size_x, page_size_y, max_mip_level)
+        return out
+    else:
+        out = _get_plugin().virtual_texture_feedback(
+            uv, mask, 
+            filter_mode_enum, boundary_mode_enum, 
+            texture_depth, texture_height, texture_width, texture_channels, 
+            page_size_x, page_size_y)
+        return out
 
 def calcPageNum(wh, page_size) -> int:
     return wh // page_size if wh >= page_size else 1
@@ -959,8 +959,10 @@ def virtual_texture(texture_depth, texture_height, texture_width, texture_channe
                                            texture_depth, texture_height, texture_width, texture_channels, 
                                            page_size_x, page_size_y, *pages[0])
 
+@torch.no_grad()
 def virtual_texture_construct_mip(texture_depth, texture_height, texture_width, texture_channels, pages: list[torch.Tensor], page_size_x=512, page_size_y=512, max_mip_level=None, use_cuda=False):
     # If use_cuda is False, pages must have data type float32 and reside in CPU memory.
+    # If use_cuda is True, pages must reside in GPU memory, but can have data type float16 or float32.
     if max_mip_level is None:
         max_mip_level = -1
     else:
@@ -979,18 +981,18 @@ def virtual_texture_construct_mip(texture_depth, texture_height, texture_width, 
 # Virtual Geometry Operations.
 #----------------------------------------------------------------------------
 
+@torch.no_grad()
 def virtual_geometry_construct(pos: torch.Tensor, pos_idx, attributes=[], max_partition_size=16384, device=None):
-    with torch.no_grad():
-        if device is None:
-            device = pos.device
-        elif isinstance(device, str):
-            device = torch.device(device)
-        return _get_plugin().virtual_geometry_construct(pos, pos_idx, max_partition_size, attributes, device)
+    if device is None:
+        device = pos.device
+    elif isinstance(device, str):
+        device = torch.device(device)
+    return _get_plugin().virtual_geometry_construct(pos, pos_idx, max_partition_size, attributes, device)
 
+@torch.no_grad()
 def virtual_geometry_frustum_cull(AABBs: torch.Tensor, frustums: torch.Tensor):
-    with torch.no_grad():
-        return _get_plugin().virtual_geometry_frustum_cull(AABBs, frustums)
+    return _get_plugin().virtual_geometry_frustum_cull(AABBs, frustums)
 
+@torch.no_grad()
 def virtual_geometry_aggregate_grad(attr_grads, matching_verts):
-    with torch.no_grad():
-        _get_plugin().virtual_geometry_aggregate_grad(attr_grads, matching_verts)
+    _get_plugin().virtual_geometry_aggregate_grad(attr_grads, matching_verts)

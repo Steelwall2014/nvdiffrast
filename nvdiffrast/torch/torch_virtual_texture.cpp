@@ -397,7 +397,7 @@ torch::Tensor virtual_texture_fwd_mip(
         int page_num_y = calcPageNum(sz.y, page_size_y);
         int page_num_x = calcPageNum(sz.x, page_size_x);
         int numPages = page_num_x*page_num_y;
-        NVDR_CHECK(numPages == pages[mip].size(), "virtual_texture_fwd_mip: The number of pages mismatches in mipmap level " + std::to_string(mip));
+        NVDR_CHECK(numPages == pages[mip].size(), "virtual_texture_fwd_mip: The number of pages mismatches in mipmap level " + std::to_string(mip) + ", expected " + std::to_string(numPages) + " but get " + std::to_string(pages[mip].size()));
         p.tex[mip] = (const float**)mip_ptr[mip].data_ptr();
     }
     p.uv = uv.data_ptr<float>();

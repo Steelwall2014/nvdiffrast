@@ -820,7 +820,7 @@ class _virtual_texture_func_mip(torch.autograd.Function):
         if mask is None:
             mask = empty
         
-        mip_pages = slice_mipmap(texture_width, texture_width, page_size_x, page_size_y, pages)
+        mip_pages = slice_mipmap(texture_width, texture_height, page_size_x, page_size_y, pages)
 
         out = _get_plugin().virtual_texture_fwd_mip(
             uv, uv_da, mip_level_bias, mask,
@@ -837,7 +837,7 @@ class _virtual_texture_func_mip(torch.autograd.Function):
         uv, uv_da, mip_level_bias, *pages = ctx.saved_tensors
         mask, filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y = ctx.saved_misc
         
-        mip_pages = slice_mipmap(texture_width, texture_width, page_size_x, page_size_y, pages)
+        mip_pages = slice_mipmap(texture_width, texture_height, page_size_x, page_size_y, pages)
 
         if filter_mode == 'linear-mipmap-linear':
             g_pages, g_uv, g_uv_da, g_mip_level_bias = _get_plugin().virtual_texture_grad_linear_mipmap_linear(

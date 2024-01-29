@@ -996,3 +996,32 @@ def virtual_geometry_frustum_cull(AABBs: torch.Tensor, frustums: torch.Tensor):
 @torch.no_grad()
 def virtual_geometry_aggregate_grad(attr_grads, matching_verts):
     _get_plugin().virtual_geometry_aggregate_grad(attr_grads, matching_verts)
+
+class _virtual_geometry_assemble_clusters(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, not_culled, shared_verts, *attribute):
+        merged_attribute: list[torch.Tensor] = []
+        for cluster_id in not_culled:
+            cluster: torch.Tensor = attribute[cluster_id]
+            assert(cluster.is_cuda)
+            merged_attribute.append(cluster)
+        ctx.saved_misc = not_culled, shared_verts, len(attribute)
+        return tuple(merged_attribute)
+    
+    @staticmethod
+    def backward(ctx, *grad_attr):
+        not_culled, shared_verts, num_clusters = ctx.saved_misc
+        empty = torch.tensor([], dtype=torch.float32)
+        all_grad_attr = [empty] * num_clusters
+        for i, cluster_id in enumerate(not_culled):
+            all_grad_attr[cluster_id] = grad_attr[i]
+        virtual_geometry_aggregate_grad(all_grad_attr, shared_verts)
+        for i in range(len(all_grad_attr)):
+            if all_grad_attr[i].numel() == 0:
+                all_grad_attr[i] = None
+        return (None, None) + tuple(all_grad_attr)
+    
+def virtual_geometry_assemble_clusters(not_culled: list[int], shared_verts: list[list[tuple[int, int]]], clusters: list[torch.Tensor]) -> torch.Tensor:
+    assembled_cluster = _virtual_geometry_assemble_clusters.apply(not_culled, shared_verts, *clusters)
+    return torch.cat(assembled_cluster, dim=0)

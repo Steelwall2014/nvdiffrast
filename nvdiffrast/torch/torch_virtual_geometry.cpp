@@ -131,66 +131,34 @@ torch::Tensor virtual_geometry_frustum_cull(torch::Tensor AABBs, torch::Tensor F
 
 void virtual_geometry_aggregate_grad(std::vector<torch::Tensor> ClustersGradients, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices)
 {
-    std::vector<float*> cuda_grads;
-    std::vector<float*> cpu_grads;
-    std::optional<torch::Tensor> cuda_tensor = std::nullopt;
-    std::optional<torch::Tensor> cpu_tensor = std::nullopt;
+    /*
+    *   There are three situations: 
+    *   1. All shared vertices in a group are within the frustum. In this case, all of the clusters of these shared vertices 
+    *   will have gradients and can be aggregated.
+    *   2. All shared vertices in a group are outside the frustum. In this case, gradient aggregation is not needed.
+    *   3. Some of the vertices in a group are within the frustum, while others are not. This happens when the shared vertices
+    *   are outside the frustum, but some of the clusters they belong to are within the frustum. 
+    *   In this case, the gradient of these vertices will be zero, so gradient aggregation is not needed either.
+    */
 
+    std::vector<float*> cuda_grads;
+    torch::Tensor cuda_tensor;
     for (auto& grad : ClustersGradients)
     {
-        bool has_grad = grad.defined() && grad.nbytes();
-        if (!has_grad)
+        if (at::cuda::check_device(grad) && grad.defined() && grad.nbytes())
         {
-            cpu_grads.push_back(NULL);
-            cuda_grads.push_back(NULL);
+            cuda_grads.push_back(grad.data_ptr<float>());
+            cuda_tensor = grad;
         }
         else 
         {
-            NVDR_CHECK(grad.sizes().size() == 2 && grad.size(0) > 0 && grad.size(1) > 0, "The attribute of each grad must have shape [>0, >0]");
-            if (at::cuda::check_device({grad}))
-            {
-                cuda_tensor = grad;
-                cuda_grads.push_back(grad.data_ptr<float>());
-                cpu_grads.push_back(NULL);
-            }
-            else 
-            {
-                cpu_tensor = grad;
-                cpu_grads.push_back(grad.data_ptr<float>());
-                cuda_grads.push_back(NULL);
-            }
+            cuda_grads.push_back(nullptr);
         }
     }
 
-    for (auto& Group : MatchingVertices)
+    if (!cuda_grads.empty())
     {
-        bool all_cuda = true;
-        bool all_cpu = true;
-        bool all_defined = true;
-        bool all_not_defined = true;
-        for (auto& Vertex : Group)
-        {
-            int cluster_index = std::get<0>(Vertex);   // cluster index
-            if (ClustersGradients[cluster_index].defined() && ClustersGradients[cluster_index].nbytes())
-            {
-                all_not_defined = false;
-                if (at::cuda::check_device({ClustersGradients[cluster_index]}))
-                    all_cpu = false;
-                else
-                    all_cuda = false;
-            }
-            else 
-            {
-                all_defined = false;
-            }
-        }
-        NVDR_CHECK(all_defined || all_not_defined, "The gradients of a group of matching vertices must be either all defined or all not defined");
-        NVDR_CHECK(all_cuda || all_cpu, "All gradients of a group of matching vertices must be on the same device");
-    }
-
-    if (cuda_tensor)
-    {
-        const at::cuda::OptionalCUDAGuard device_guard(device_of(cuda_tensor.value()));
+        const at::cuda::OptionalCUDAGuard device_guard(device_of(cuda_tensor));
 
         cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -215,44 +183,12 @@ void virtual_geometry_aggregate_grad(std::vector<torch::Tensor> ClustersGradient
         p.matchingVerts = (int*)p_matchingVerts.data_ptr();
         p.offsetGroups = (int*)p_offsetGroups.data_ptr();
         p.numGroups = MatchingVertices.size();
-        p.numAttr = cuda_tensor->size(1);
+        p.numAttr = cuda_tensor.size(1);
 
-        dim3 blockSize = dim3(32, 1, 1);
-        dim3 gridSize = dim3(16, std::ceil(p.numGroups / 512.0), 1);
+        dim3 blockSize = dim3(64, 1, 1);
+        dim3 gridSize = dim3(std::ceil(p.numGroups / 64.0), 1, 1);
 
         void* args[] = {&p};
         NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel((void*)VirtualGeometryAggregateGradKernel, gridSize, blockSize, args, 0, stream));
-
     }
-
-    if (cpu_tensor)
-    {
-        int thread_num = 1;
-        if (std::thread::hardware_concurrency() > 0)
-            thread_num = std::thread::hardware_concurrency();
-        ParallelFor(MatchingVertices.size(), thread_num, [&](size_t i) { 
-            auto& Group = MatchingVertices[i];
-            int numVerts = Group.size();
-            int numAttr = cpu_tensor->size(1);
-            for (int j = 0; j < numAttr; j++)
-            {
-                float grad = 0.f;
-                for (int i = 0; i < numVerts; i++)
-                {
-                    int clusterIndex = std::get<0>(Group[i]);
-                    int vertexIndex = std::get<1>(Group[i]);
-                    if (cpu_grads[clusterIndex])
-                        grad += cpu_grads[clusterIndex][vertexIndex * numAttr + j];
-                }
-                for (int i = 0; i < numVerts; i++)
-                {
-                    int clusterIndex = std::get<0>(Group[i]);
-                    int vertexIndex = std::get<1>(Group[i]);
-                    if (cpu_grads[clusterIndex])
-                        cpu_grads[clusterIndex][vertexIndex * numAttr + j] = grad;
-                }
-            }
-        });
-    }
-
 }

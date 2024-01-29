@@ -54,15 +54,23 @@ __global__ void VirtualGeometryFrustumCullKernal(VirtualGeometryFrustumCullParam
 // Accumulate gradients kernel.
 __global__ void VirtualGeometryAggregateGradKernel(const VirtualGeometryAccumulateGradParams p)
 {
-    int px = blockIdx.x * blockDim.x + threadIdx.x;
-    int py = blockIdx.y * blockDim.y + threadIdx.y;
-    int group_index = px + py*blockDim.x*gridDim.x;
+    int group_index = blockIdx.x * blockDim.x + threadIdx.x;
     if (group_index >= p.numGroups)
         return;
 
     int offset = p.offsetGroups[group_index];
     int* pGroup = p.matchingVerts + offset;
     int numVerts = (p.offsetGroups[group_index+1] - offset) / 2;
+
+    // When some of the shared vertices in a group doesn't have gradients,
+    // it means the shared vertices are outside the frustum, 
+    // so gradient aggregation is not needed for this group.
+    for (int i = 0; i < numVerts; i++)
+    {
+        int cluster_index = pGroup[i*2];
+        if (p.grad[cluster_index] == nullptr)
+            return;
+    }
 
     for (int j = 0; j < p.numAttr; j++)
     {
@@ -72,8 +80,7 @@ __global__ void VirtualGeometryAggregateGradKernel(const VirtualGeometryAccumula
             int cluster_index = pGroup[i*2];
             int vertex_index = pGroup[i*2+1];
             int ptr = vertex_index * p.numAttr + j;
-            if (p.grad[cluster_index])
-                grad += p.grad[cluster_index][ptr];
+            grad += p.grad[cluster_index][ptr];
         }
 
         for (int i = 0; i < numVerts; i++)
@@ -81,8 +88,7 @@ __global__ void VirtualGeometryAggregateGradKernel(const VirtualGeometryAccumula
             int cluster_index = pGroup[i*2];
             int vertex_index = pGroup[i*2+1];
             int ptr = vertex_index * p.numAttr + j;
-            if (p.grad[cluster_index])
-                p.grad[cluster_index][ptr] = grad;
+            p.grad[cluster_index][ptr] = grad;
         }
     }
     

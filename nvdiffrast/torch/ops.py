@@ -772,19 +772,19 @@ def virtual_texture_feedback(texture_depth, texture_height, texture_width, textu
             uv_da = empty
         if mip_level_bias is None:
             mip_level_bias = empty
-        out = _get_plugin().virtual_texture_feedback_mip(
+        out, grad_coverage = _get_plugin().virtual_texture_feedback_mip(
             uv, uv_da, mip_level_bias, mask,
             filter_mode_enum, boundary_mode_enum, 
             texture_depth, texture_height, texture_width, texture_channels, 
             page_size_x, page_size_y, max_mip_level)
-        return out
+        return out, grad_coverage
     else:
         out = _get_plugin().virtual_texture_feedback(
             uv, mask, 
             filter_mode_enum, boundary_mode_enum, 
             texture_depth, texture_height, texture_width, texture_channels, 
             page_size_x, page_size_y)
-        return out
+        return out, None
 
 def calcPageNum(wh, page_size) -> int:
     return wh // page_size if wh >= page_size else 1

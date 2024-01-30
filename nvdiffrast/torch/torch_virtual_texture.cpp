@@ -143,7 +143,7 @@ static void set_modes(VirtualTextureKernelParams& p, int filter_mode, int bounda
 //------------------------------------------------------------------------
 // Virtual texture feedback op.
 
-std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, int max_mip_level)
+std::tuple<std::vector<torch::Tensor>, torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, int max_mip_level)
 {
     NVDR_CHECK(texture_height>0 && (texture_height & (texture_height-1))==0, "virtual_texture_feedback_mip: Texture height must be power of two.");
     NVDR_CHECK(texture_width>0 && (texture_width & (texture_width-1))==0, "virtual_texture_feedback_mip: Texture width must be power of two.");
@@ -231,6 +231,8 @@ std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch:
         Out[mip] = feedback;
         p.feedback[mip] = feedback.data_ptr<bool>();
     }
+    torch::Tensor grad_coverage = torch::zeros_like(Out[0]);
+    p.grad_coverage = grad_coverage.data_ptr<bool>();
 
     // Choose kernel variants based on channel count.
     void* args[] = {&p};
@@ -282,7 +284,7 @@ std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch:
     NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[func_idx], gridSize, blockSize, args, 0, stream));
 
     // Return output tensor.
-    return Out;
+    return { Out, grad_coverage };
 
 }
 
@@ -290,7 +292,7 @@ std::vector<torch::Tensor> virtual_texture_feedback_mip(torch::Tensor uv, torch:
 std::vector<torch::Tensor> virtual_texture_feedback(torch::Tensor uv, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y)
 {
     torch::Tensor empty_tensor;
-    return virtual_texture_feedback_mip(uv, empty_tensor, empty_tensor, mask, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, 0);
+    return std::get<0>(virtual_texture_feedback_mip(uv, empty_tensor, empty_tensor, mask, filter_mode, boundary_mode, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, 0));
 }
 
 //------------------------------------------------------------------------
@@ -731,28 +733,32 @@ virtual_texture_grad_linear_mipmap_linear(torch::Tensor uv, torch::Tensor dy, to
     // Launch main gradient kernel.
     NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[func_idx], gridSize, blockSize, args, 0, stream));
 
-    // Launch kernel to pull gradients from mip levels. Don't do this if mip stack was supplied - individual level gradients are already there.
-    if (p.enableMip)
-    {
-        int pixel_num_per_thread_x = p.texWidth / 1024;
-        int pixel_num_per_thread_y = p.texHeight / 1024;
-        int width = p.texWidth / pixel_num_per_thread_x;
-        int height = p.texHeight / pixel_num_per_thread_y;
-        dim3 blockSize = getLaunchBlockSize(TEX_GRAD_MAX_MIP_KERNEL_BLOCK_WIDTH, TEX_GRAD_MAX_MIP_KERNEL_BLOCK_HEIGHT, width, height);
-        dim3 gridSize  = getLaunchGridSize(blockSize, width, height, p.texDepth);
-        int sharedBytes = blockSize.x * blockSize.y * p.channels * sizeof(float);
-        void* args[] = {&p, &pixel_num_per_thread_x, &pixel_num_per_thread_y};
-        void* mip_grad_func_tbl[6] = { 
-            (void*)VirtualTextureMipGradKernel1, 
-            (void*)VirtualTextureMipGradKernel2, 
-            (void*)VirtualTextureMipGradKernel4,
-            (void*)VirtualTextureMipGradKernelHalf1, 
-            (void*)VirtualTextureMipGradKernelHalf2, 
-            (void*)VirtualTextureMipGradKernelHalf4, };
-        if (dtype == torch::kHalf)
-            channel_div_idx += 3;   // Choose half variant.
-        NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(mip_grad_func_tbl[channel_div_idx], gridSize, blockSize, args, sharedBytes, stream));
-    }
+    /** NOTE: DON'T pull gradients from mip levels every time we backward, because it requires all of the used lower level pages
+    *   to reside on cuda, which sometimes consumes too much memory (e.g. when the highest level is accessed, we have to 
+    *   load all zero level pages to cuda). Instead, we do the gradient pulling before step() in optimizer and it should be 
+    *   called explicitly.
+    */
+    // if (p.enableMip)
+    // {
+    //     int pixel_num_per_thread_x = p.texWidth / 1024;
+    //     int pixel_num_per_thread_y = p.texHeight / 1024;
+    //     int width = p.texWidth / pixel_num_per_thread_x;
+    //     int height = p.texHeight / pixel_num_per_thread_y;
+    //     dim3 blockSize = getLaunchBlockSize(TEX_GRAD_MAX_MIP_KERNEL_BLOCK_WIDTH, TEX_GRAD_MAX_MIP_KERNEL_BLOCK_HEIGHT, width, height);
+    //     dim3 gridSize  = getLaunchGridSize(blockSize, width, height, p.texDepth);
+    //     int sharedBytes = blockSize.x * blockSize.y * p.channels * sizeof(float);
+    //     void* args[] = {&p, &pixel_num_per_thread_x, &pixel_num_per_thread_y};
+    //     void* mip_grad_func_tbl[6] = { 
+    //         (void*)VirtualTextureMipGradKernel1, 
+    //         (void*)VirtualTextureMipGradKernel2, 
+    //         (void*)VirtualTextureMipGradKernel4,
+    //         (void*)VirtualTextureMipGradKernelHalf1, 
+    //         (void*)VirtualTextureMipGradKernelHalf2, 
+    //         (void*)VirtualTextureMipGradKernelHalf4, };
+    //     if (dtype == torch::kHalf)
+    //         channel_div_idx += 3;   // Choose half variant.
+    //     NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(mip_grad_func_tbl[channel_div_idx], gridSize, blockSize, args, sharedBytes, stream));
+    // }
 
     // Return output tensors.
     return std::tuple<std::vector<std::vector<torch::Tensor>>, torch::Tensor, torch::Tensor, torch::Tensor >(grad_tex, grad_uv, grad_uv_da, grad_mip_level_bias);
@@ -1054,4 +1060,9 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
     }
 
     return Out;
+}
+
+void virtual_texture_pull_gradients(int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages_grads)
+{
+
 }

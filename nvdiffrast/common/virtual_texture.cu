@@ -578,12 +578,17 @@ static __forceinline__ __device__ void VirtualTextureFeedbackKernelTemplate(cons
         }
     }
 
+    /** NOTE: This will produce too much memory consumption when higher mipmap level pages
+    *   are accessed since it covers many pages of lower mipmap level and 
+    *   too many pages will be marked as accessed. But we still need the coverage information
+    *   because it's useful for pulling gradients from mipmaps.
+    */
     // A texel of higher mipmap level covers more than one texels of the first mipmap level.
     // So some texels of the first mipmap level are not directly accessed, but their 
     // gradients may be affected by the texels of higher mipmap levels.
     // That's why we need the following codes to calculate the coverage.
     {
-        bool* pOut = p.feedback[0];
+        bool* pOut = p.grad_coverage;
         int page_num_x = calcPageNum(p.texWidth, p.page_size_x);
         int page_num_y = calcPageNum(p.texHeight, p.page_size_y);
         int4 coverage0 = calcPixelCoverage(p, uv, level0);

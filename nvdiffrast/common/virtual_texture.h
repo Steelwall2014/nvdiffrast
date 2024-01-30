@@ -19,6 +19,7 @@ struct VirtualTextureKernelParams
     float*          gradUVDA;                       // Outgoing texcoord pixel differential gradient.
     float*          gradMipLevelBias;               // Outgoing mip level bias gradient.
     bool*           feedback[TEX_MAX_MIP_LEVEL];    // Outgoing virtual texture pages feedback.
+    bool*           grad_coverage;
     int             enableMip;                      // If true, we have uv_da and/or mip_level_bias input(s), and a mip tensor.
     int             filterMode;                     // One of the TEX_MODE_ constants.
     int             boundaryMode;                   // One of the TEX_BOUNDARY_MODE_ contants.

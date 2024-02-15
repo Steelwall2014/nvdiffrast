@@ -93,7 +93,6 @@ VirtualGeometryConstructResult virtual_geometry_construct(
         Bar.update(float(ClusterIndex+1) / Result.Clusters.size());
     }
     
-    Mesh.MatchingVertices = Result.MatchingVertices;
 
     return Mesh;
 }
@@ -129,7 +128,7 @@ torch::Tensor virtual_geometry_frustum_cull(torch::Tensor AABBs, torch::Tensor F
     return Culled;
 }
 
-void virtual_geometry_aggregate_grad(std::vector<torch::Tensor> ClustersGradients, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices)
+void virtual_geometry_aggregate_grad(std::vector<torch::Tensor> ClustersGradients, torch::Tensor MatchingVertices, torch::Tensor OffsetGroups)
 {
     /*
     *   There are three situations: 
@@ -166,23 +165,9 @@ void virtual_geometry_aggregate_grad(std::vector<torch::Tensor> ClustersGradient
         
         auto p_grad = prepareCudaArray(cuda_grads);
         p.grad = (float**)p_grad.data_ptr();
-        std::vector<int32_t> matchingVerts;
-        std::vector<int32_t> offsetGroups;
-        for (auto& Group : MatchingVertices)
-        {
-            offsetGroups.push_back(matchingVerts.size());
-            for (auto& Vertex : Group)
-            {
-                matchingVerts.push_back(std::get<0>(Vertex));   // cluster index
-                matchingVerts.push_back(std::get<1>(Vertex));   // vertex index
-            }
-        }
-        offsetGroups.push_back(matchingVerts.size());
-        auto p_matchingVerts = prepareCudaArray(matchingVerts);
-        auto p_offsetGroups = prepareCudaArray(offsetGroups);
-        p.matchingVerts = (int*)p_matchingVerts.data_ptr();
-        p.offsetGroups = (int*)p_offsetGroups.data_ptr();
-        p.numGroups = MatchingVertices.size();
+        p.matchingVerts = MatchingVertices.data_ptr<int>();
+        p.offsetGroups = OffsetGroups.data_ptr<int>();
+        p.numGroups = OffsetGroups.size(0)-1;
         p.numAttr = cuda_tensor.size(1);
 
         dim3 blockSize = dim3(64, 1, 1);

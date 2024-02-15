@@ -56,8 +56,9 @@ OP_RETURN_WTTT      virtual_texture_grad_linear_mipmap_linear   (torch::Tensor u
 OP_RETURN_W         virtual_texture_construct_mip               (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
 OP_RETURN_W         virtual_texture_construct_mip_cuda          (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
 torch::Tensor       virtual_geometry_frustum_cull               (torch::Tensor AABBs, torch::Tensor Frustums);
-void                virtual_geometry_aggregate_grad             (std::vector<torch::Tensor> ClustersGradients, std::vector<std::vector<std::tuple<int, int>>> MatchingVertices);
+void                virtual_geometry_aggregate_grad             (std::vector<torch::Tensor> ClustersGradients, torch::Tensor MatchingVertices, torch::Tensor OffsetGroups);
 VirtualGeometryConstructResult virtual_geometry_construct       (torch::Tensor Positions, torch::Tensor Indices, int MaxPartitionSize, std::vector<torch::Tensor> Attributes, torch::Device Device);
+void                virtual_texture_pull_gradients       (int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> grad_tex);
 //------------------------------------------------------------------------
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -72,8 +73,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def_readwrite("Indices", &VirtualGeometryCluster::Indices)
         .def_readwrite("OldTriangleIndices", &VirtualGeometryCluster::OldTriangleIndices);
     pybind11::class_<VirtualGeometryConstructResult>(m, "VirtualGeometryConstructResult")
-        .def_readwrite("Clusters", &VirtualGeometryConstructResult::Clusters)
-        .def_readwrite("MatchingVertices", &VirtualGeometryConstructResult::MatchingVertices);
+        .def_readwrite("Clusters", &VirtualGeometryConstructResult::Clusters);
 
     // Plumbing to torch/c10 logging system.
     m.def("get_log_level", [](void)     { return FLAGS_caffe2_log_level;  }, "get log level");
@@ -110,6 +110,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("virtual_geometry_construct",                 &virtual_geometry_construct,        "virtual geometry construction");
     m.def("virtual_geometry_frustum_cull",              &virtual_geometry_frustum_cull,     "virtual geometry frustum cull");
     m.def("virtual_geometry_aggregate_grad",           &virtual_geometry_aggregate_grad,  "virtual geometry aggregate gradients");
+    m.def("virtual_texture_pull_gradients",           &virtual_texture_pull_gradients,  "virtual texture pull gradients from mipmaps");
     
 }
 

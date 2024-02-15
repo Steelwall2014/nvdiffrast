@@ -814,26 +814,4 @@ void ClusterTriangles(
         int32_t num_clusters = NumClusters.fetch_add(1);
         Bar.update(float(num_clusters+1) / Ranges.size());
     });
-
-    vector<set<tuple<int32_t, int32_t>>> AttrAppearsInClusters(Data.NumVertices);
-    for (int ClusterIndex = 0; ClusterIndex < clusters.size(); ClusterIndex++)
-    {
-        auto& OldToNewMapping = OldToNewMappings[ClusterIndex];
-        auto& ExternalEdges = ClusterExternalEdges[ClusterIndex];
-        for (int i = 0; i < ExternalEdges.size(); i++)
-        {
-            idx_t EdgeIndex = ExternalEdges[i];
-            idx_t OldIndex = Indices[EdgeIndex];
-            int32_t NewIndex = std::lower_bound(OldToNewMapping.begin(), OldToNewMapping.end(), OldIndex) - OldToNewMapping.begin();
-            AttrAppearsInClusters[OldIndex].insert({ClusterIndex,NewIndex});
-        }
-    }
-    for (set<tuple<int32_t, int32_t>>& MatchingVert : AttrAppearsInClusters)
-    {
-        if (MatchingVert.size() >= 2)
-        {
-            vector<tuple<int32_t, int32_t>> verts = vector<tuple<int32_t, int32_t>>(MatchingVert.begin(), MatchingVert.end());
-            OutResult.MatchingVertices.push_back(verts);
-        }
-    }
 }

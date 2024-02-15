@@ -995,7 +995,17 @@ def virtual_geometry_frustum_cull(AABBs: torch.Tensor, frustums: torch.Tensor):
 
 @torch.no_grad()
 def virtual_geometry_aggregate_grad(attr_grads, matching_verts):
-    _get_plugin().virtual_geometry_aggregate_grad(attr_grads, matching_verts)
+    matching_verts_tensor = []
+    offsets = []
+    for group in matching_verts:
+        offsets.append(len(matching_verts_tensor))
+        for cid, vid in group:
+            matching_verts_tensor.append(cid)
+            matching_verts_tensor.append(vid)
+    offsets.append(len(matching_verts_tensor))
+    matching_verts_tensor = torch.tensor(matching_verts_tensor, dtype=torch.int32, device="cuda")
+    offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
+    _get_plugin().virtual_geometry_aggregate_grad(attr_grads, matching_verts_tensor, offsets)
 
 class _virtual_geometry_assemble_clusters(torch.autograd.Function):
 
@@ -1025,3 +1035,7 @@ class _virtual_geometry_assemble_clusters(torch.autograd.Function):
 def virtual_geometry_assemble_clusters(not_culled: list[int], shared_verts: list[list[tuple[int, int]]], clusters: list[torch.Tensor]) -> torch.Tensor:
     assembled_cluster = _virtual_geometry_assemble_clusters.apply(not_culled, shared_verts, *clusters)
     return torch.cat(assembled_cluster, dim=0)
+
+@torch.no_grad()
+def virtual_texture_pull_gradients(texture_depth, texture_height, texture_width, texture_channels, grad_tex: list[list[torch.Tensor]], page_size_x=512, page_size_y=512):
+    _get_plugin().virtual_texture_pull_gradients(texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y, grad_tex)

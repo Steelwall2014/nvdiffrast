@@ -362,8 +362,6 @@ struct MatchingVertex
 struct ClusterResult
 {
     std::vector<Cluster> Clusters;
-    
-    std::vector<std::vector<std::tuple<int32_t, int32_t>>> MatchingVertices;
 };
 
 void ClusterTriangles(

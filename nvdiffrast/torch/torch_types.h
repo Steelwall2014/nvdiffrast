@@ -79,5 +79,4 @@ class VirtualGeometryConstructResult
 {
 public:
     std::vector<VirtualGeometryCluster>                 Clusters;
-    std::vector<std::vector<std::tuple<int, int>>>      MatchingVertices;
 };

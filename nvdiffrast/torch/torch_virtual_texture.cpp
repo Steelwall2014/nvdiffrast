@@ -1062,7 +1062,48 @@ std::vector<std::vector<torch::Tensor>> virtual_texture_construct_mip(int max_mi
     return Out;
 }
 
-void virtual_texture_pull_gradients(int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages_grads)
+void virtual_texture_pull_gradients(int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> grad_tex)
 {
+    VirtualTextureKernelParams p = {}; // Initialize all fields to zero.
+    int max_mip_level = grad_tex.size()-1;
+    p.texDepth  = texture_depth;
+    p.texHeight = texture_height;
+    p.texWidth  = texture_width;
+    p.channels  = texture_channels;
+    p.page_size_x = page_size_x;
+    p.page_size_y = page_size_y;
+    p.mipLevelMax = max_mip_level;
+    auto grad_mip_ptr = prepareCudaTensorArray<false>(grad_tex);
+    for (int mip = 0; mip <= max_mip_level; mip++)
+    {
+        p.gradTex[mip] = (float**)grad_mip_ptr[mip].data_ptr();
+    }
+    torch::ScalarType dtype = torch::kFloat32;  // Default to float32.
+    std::vector<torch::Tensor> cuda_pages = check_and_get_type(grad_tex, dtype);
+    const at::cuda::OptionalCUDAGuard device_guard(device_of(cuda_pages[0]));
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    int channel_div_idx = 0;
+    if (!(p.channels & 3))
+        channel_div_idx = 2;  // Channel count divisible by 4.
+    else if (!(p.channels & 1))
+        channel_div_idx = 1;  // Channel count divisible by 2.
 
+    int pixel_num_per_thread_x = p.texWidth / 1024;
+    int pixel_num_per_thread_y = p.texHeight / 1024;
+    int width = p.texWidth / pixel_num_per_thread_x;
+    int height = p.texHeight / pixel_num_per_thread_y;
+    dim3 blockSize = getLaunchBlockSize(TEX_GRAD_MAX_MIP_KERNEL_BLOCK_WIDTH, TEX_GRAD_MAX_MIP_KERNEL_BLOCK_HEIGHT, width, height);
+    dim3 gridSize  = getLaunchGridSize(blockSize, width, height, p.texDepth);
+    int sharedBytes = blockSize.x * blockSize.y * p.channels * sizeof(float);
+    void* args[] = {&p, &pixel_num_per_thread_x, &pixel_num_per_thread_y};
+    void* mip_grad_func_tbl[6] = { 
+        (void*)VirtualTextureMipGradKernel1, 
+        (void*)VirtualTextureMipGradKernel2, 
+        (void*)VirtualTextureMipGradKernel4,
+        (void*)VirtualTextureMipGradKernelHalf1, 
+        (void*)VirtualTextureMipGradKernelHalf2, 
+        (void*)VirtualTextureMipGradKernelHalf4, };
+    if (dtype == torch::kHalf)
+        channel_div_idx += 3;   // Choose half variant.
+    NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(mip_grad_func_tbl[channel_div_idx], gridSize, blockSize, args, sharedBytes, stream));
 }

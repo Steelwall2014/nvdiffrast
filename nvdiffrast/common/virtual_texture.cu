@@ -186,8 +186,6 @@ static __device__ __forceinline__ float2 indexTextureLinear_vt(const VirtualText
         if (iu1_out || iv0_out) tcOut.y = -1;
         if (iu0_out || iv1_out) tcOut.z = -1;
         if (iu1_out || iv1_out) tcOut.w = -1;
-
-        return make_float2(u, v);   // Exit.
     }
 
     // Because sometimes the width and height may be smaller than the page size,

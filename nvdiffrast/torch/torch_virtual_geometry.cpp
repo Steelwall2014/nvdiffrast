@@ -9,7 +9,8 @@
 #include "torch_types.h"
 
 void VirtualGeometryFrustumCullKernal(VirtualGeometryFrustumCullParams p);
-void VirtualGeometryAggregateGradKernel(VirtualGeometryAccumulateGradParams p);
+void VirtualGeometryAllReduceKernelSum(VirtualGeometryAllReduceParams p);
+void VirtualGeometryAllReduceKernelAvg(VirtualGeometryAllReduceParams p);
 
 struct ProgressBar
 {
@@ -128,52 +129,47 @@ torch::Tensor virtual_geometry_frustum_cull(torch::Tensor AABBs, torch::Tensor F
     return Culled;
 }
 
-void virtual_geometry_aggregate_grad(std::vector<torch::Tensor> ClustersGradients, torch::Tensor MatchingVertices, torch::Tensor OffsetGroups)
+void virtual_geometry_vertex_all_reduce(std::vector<torch::Tensor> cluster_vertices, torch::Tensor shared_verts, torch::Tensor shared_verts_offsets, int reduce_op)
 {
-    /*
-    *   There are three situations: 
-    *   1. All shared vertices in a group are within the frustum. In this case, all of the clusters of these shared vertices 
-    *   will have gradients and can be aggregated.
-    *   2. All shared vertices in a group are outside the frustum. In this case, gradient aggregation is not needed.
-    *   3. Some of the vertices in a group are within the frustum, while others are not. This happens when the shared vertices
-    *   are outside the frustum, but some of the clusters they belong to are within the frustum. 
-    *   In this case, the gradient of these vertices will be zero, so gradient aggregation is not needed either.
-    */
+    if (cluster_vertices.empty())
+        return;
+    if (shared_verts.numel() == 0)
+        return;
 
-    std::vector<float*> cuda_grads;
-    torch::Tensor cuda_tensor;
-    for (auto& grad : ClustersGradients)
+    NVDR_CHECK_DEVICE(cluster_vertices);
+    NVDR_CHECK_DEVICE(shared_verts);
+    NVDR_CHECK_DEVICE(shared_verts_offsets);
+    std::vector<float*> pointers;
+    for (auto vertices : cluster_vertices)
     {
-        if (at::cuda::check_device(grad) && grad.defined() && grad.nbytes())
-        {
-            cuda_grads.push_back(grad.data_ptr<float>());
-            cuda_tensor = grad;
-        }
-        else 
-        {
-            cuda_grads.push_back(nullptr);
-        }
+        NVDR_CHECK(vertices.sizes().size() == 2, "Vertices must have shape [>0, >0]");
+        NVDR_CHECK(vertices.defined() && vertices.nbytes(), "Vertices must be defined and non-empty");
+        pointers.push_back(vertices.data_ptr<float>());
     }
 
-    if (!cuda_grads.empty())
-    {
-        const at::cuda::OptionalCUDAGuard device_guard(device_of(cuda_tensor));
+    const at::cuda::OptionalCUDAGuard device_guard(device_of(cluster_vertices[0]));
 
-        cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-        VirtualGeometryAccumulateGradParams p{};
-        
-        auto p_grad = prepareCudaArray(cuda_grads);
-        p.grad = (float**)p_grad.data_ptr();
-        p.matchingVerts = MatchingVertices.data_ptr<int>();
-        p.offsetGroups = OffsetGroups.data_ptr<int>();
-        p.numGroups = OffsetGroups.size(0)-1;
-        p.numAttr = cuda_tensor.size(1);
+    VirtualGeometryAllReduceParams p{};
+    
+    auto p_vertices = prepareCudaArray(pointers);
+    p.vertices = (float**)p_vertices.data_ptr();
+    p.matchingVerts = shared_verts.data_ptr<int>();
+    p.offsetGroups = shared_verts_offsets.data_ptr<int>();
+    p.numGroups = shared_verts_offsets.size(0)-1;
+    p.numAttr = cluster_vertices[0].size(1);
 
-        dim3 blockSize = dim3(64, 1, 1);
-        dim3 gridSize = dim3(std::ceil(p.numGroups / 64.0), 1, 1);
+    dim3 blockSize = dim3(64, 1, 1);
+    dim3 gridSize = dim3(std::ceil(p.numGroups / 64.0), 1, 1);
 
-        void* args[] = {&p};
-        NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel((void*)VirtualGeometryAggregateGradKernel, gridSize, blockSize, args, 0, stream));
-    }
+    void* args[] = {&p};
+
+    void* func_tbl[] = {
+        (void*)VirtualGeometryAllReduceKernelSum, 
+        (void*)VirtualGeometryAllReduceKernelAvg
+    };
+
+    NVDR_CHECK_CUDA_ERROR(cudaLaunchKernel(func_tbl[reduce_op], gridSize, blockSize, args, 0, stream));
+
 }

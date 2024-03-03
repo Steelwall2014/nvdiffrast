@@ -56,7 +56,7 @@ OP_RETURN_WTTT      virtual_texture_grad_linear_mipmap_linear   (torch::Tensor u
 OP_RETURN_W         virtual_texture_construct_mip               (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
 OP_RETURN_W         virtual_texture_construct_mip_cuda          (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
 torch::Tensor       virtual_geometry_frustum_cull               (torch::Tensor AABBs, torch::Tensor Frustums);
-void                virtual_geometry_aggregate_grad             (std::vector<torch::Tensor> ClustersGradients, torch::Tensor MatchingVertices, torch::Tensor OffsetGroups);
+void                virtual_geometry_vertex_all_reduce          (std::vector<torch::Tensor> cluster_vertices, torch::Tensor shared_verts, torch::Tensor shared_verts_offsets, int reduce_op);
 VirtualGeometryConstructResult virtual_geometry_construct       (torch::Tensor Positions, torch::Tensor Indices, int MaxPartitionSize, std::vector<torch::Tensor> Attributes, torch::Device Device);
 void                virtual_texture_pull_gradients       (int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> grad_tex);
 //------------------------------------------------------------------------
@@ -109,7 +109,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("virtual_texture_construct_mip_cuda",         &virtual_texture_construct_mip_cuda,"virtual texture mipmap construction");
     m.def("virtual_geometry_construct",                 &virtual_geometry_construct,        "virtual geometry construction");
     m.def("virtual_geometry_frustum_cull",              &virtual_geometry_frustum_cull,     "virtual geometry frustum cull");
-    m.def("virtual_geometry_aggregate_grad",           &virtual_geometry_aggregate_grad,  "virtual geometry aggregate gradients");
+    m.def("virtual_geometry_vertex_all_reduce",         &virtual_geometry_vertex_all_reduce,  "virtual geometry vertex all reduce");
     m.def("virtual_texture_pull_gradients",           &virtual_texture_pull_gradients,  "virtual texture pull gradients from mipmaps");
     
 }

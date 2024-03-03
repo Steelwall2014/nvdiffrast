@@ -994,47 +994,12 @@ def virtual_geometry_frustum_cull(AABBs: torch.Tensor, frustums: torch.Tensor):
     return _get_plugin().virtual_geometry_frustum_cull(AABBs, frustums)
 
 @torch.no_grad()
-def virtual_geometry_aggregate_grad(attr_grads, matching_verts):
-    matching_verts_tensor = []
-    offsets = []
-    for group in matching_verts:
-        offsets.append(len(matching_verts_tensor))
-        for cid, vid in group:
-            matching_verts_tensor.append(cid)
-            matching_verts_tensor.append(vid)
-    offsets.append(len(matching_verts_tensor))
-    matching_verts_tensor = torch.tensor(matching_verts_tensor, dtype=torch.int32, device="cuda")
-    offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
-    _get_plugin().virtual_geometry_aggregate_grad(attr_grads, matching_verts_tensor, offsets)
-
-class _virtual_geometry_assemble_clusters(torch.autograd.Function):
-
-    @staticmethod
-    def forward(ctx, not_culled, shared_verts, *attribute):
-        merged_attribute: list[torch.Tensor] = []
-        for cluster_id in not_culled:
-            cluster: torch.Tensor = attribute[cluster_id]
-            assert(cluster.is_cuda)
-            merged_attribute.append(cluster)
-        ctx.saved_misc = not_culled, shared_verts, len(attribute)
-        return tuple(merged_attribute)
-    
-    @staticmethod
-    def backward(ctx, *grad_attr):
-        not_culled, shared_verts, num_clusters = ctx.saved_misc
-        empty = torch.tensor([], dtype=torch.float32)
-        all_grad_attr = [empty] * num_clusters
-        for i, cluster_id in enumerate(not_culled):
-            all_grad_attr[cluster_id] = grad_attr[i]
-        virtual_geometry_aggregate_grad(all_grad_attr, shared_verts)
-        for i in range(len(all_grad_attr)):
-            if all_grad_attr[i].numel() == 0:
-                all_grad_attr[i] = None
-        return (None, None) + tuple(all_grad_attr)
-    
-def virtual_geometry_assemble_clusters(not_culled: list[int], shared_verts: list[list[tuple[int, int]]], clusters: list[torch.Tensor]) -> torch.Tensor:
-    assembled_cluster = _virtual_geometry_assemble_clusters.apply(not_culled, shared_verts, *clusters)
-    return torch.cat(assembled_cluster, dim=0)
+def virtual_geometry_vertex_all_reduce(vertices: list[torch.Tensor], shared_verts: torch.Tensor, shared_verts_offsets: torch.Tensor, reduce_op="sum"):
+    reduce_op_enum = {'sum': 0, 'avg': 1}
+    if reduce_op not in reduce_op_enum:
+        raise ValueError(f"Invalid reduce_op: {reduce_op}")
+    reduce_op = reduce_op_enum[reduce_op]
+    _get_plugin().virtual_geometry_vertex_all_reduce(vertices, shared_verts, shared_verts_offsets, reduce_op)
 
 @torch.no_grad()
 def virtual_texture_pull_gradients(texture_depth, texture_height, texture_width, texture_channels, grad_tex: list[list[torch.Tensor]], page_size_x=512, page_size_y=512):

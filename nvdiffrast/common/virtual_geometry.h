@@ -1,5 +1,9 @@
 #pragma once
 #include "virtual_geometry_partition.h"
+
+#define REDUCE_OP_SUM 0
+#define REDUCE_OP_AVG 1
+
 struct Plane 
 {
     float Normal[3];
@@ -70,9 +74,9 @@ struct VirtualGeometryRasterizeGradParams
 
 //------------------------------------------------------------------------
 
-struct VirtualGeometryAccumulateGradParams
+struct VirtualGeometryAllReduceParams
 {
-    float**         grad;               // Outgoing position gradients.
+    float**         vertices;           // Outgoing vertices.
     int*            matchingVerts;      // something like |cid0,vid0,cid1,vid1|...The cids and vids between two vertical bar indicates a group of matching vertices
     int*            offsetGroups;       // The offset of each group in matchingVerts
     int             numGroups;

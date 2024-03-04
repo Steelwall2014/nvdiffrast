@@ -792,7 +792,7 @@ def calcPageNum(wh, page_size) -> int:
 def calcMipLevelSize(w, h, i) -> tuple[int]:
     return w>>i if w>>i > 1 else 1, h>>i if h>>i > 1 else 1
 
-def slice_mipmap(width, height, page_size_x, page_size_y, pages: list[torch.Tensor]) -> list[list[torch.Tensor]]:
+def unflatten_pages(width, height, page_size_x, page_size_y, pages: list[torch.Tensor]) -> list[list[torch.Tensor]]:
     mipmap_stack = []
     offset = 0
     while offset < len(pages):
@@ -820,8 +820,7 @@ class _virtual_texture_func_mip(torch.autograd.Function):
         if mask is None:
             mask = empty
         
-        mip_pages = slice_mipmap(texture_width, texture_height, page_size_x, page_size_y, pages)
-
+        mip_pages = unflatten_pages(texture_width, texture_height, page_size_x, page_size_y, pages)
         out = _get_plugin().virtual_texture_fwd_mip(
             uv, uv_da, mip_level_bias, mask,
             filter_mode_enum, boundary_mode_enum, 
@@ -837,7 +836,7 @@ class _virtual_texture_func_mip(torch.autograd.Function):
         uv, uv_da, mip_level_bias, *pages = ctx.saved_tensors
         mask, filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y = ctx.saved_misc
         
-        mip_pages = slice_mipmap(texture_width, texture_height, page_size_x, page_size_y, pages)
+        mip_pages = unflatten_pages(texture_width, texture_height, page_size_x, page_size_y, pages)
 
         if filter_mode == 'linear-mipmap-linear':
             g_pages, g_uv, g_uv_da, g_mip_level_bias = _get_plugin().virtual_texture_grad_linear_mipmap_linear(
@@ -846,8 +845,6 @@ class _virtual_texture_func_mip(torch.autograd.Function):
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, mip_pages)
             g_pages_flattened = [page for mip in g_pages for page in mip]
-            # for i, page in enumerate(pages):
-            #     page.grad = g_pages_flattened[i]
             return (None, 
                     g_uv, g_uv_da, g_mip_level_bias, None,
                     None, None, 
@@ -879,6 +876,7 @@ class _virtual_texture_func(torch.autograd.Function):
                 filter_mode_enum, boundary_mode_enum, 
                 texture_depth, texture_height, texture_width, texture_channels, 
                 page_size_x, page_size_y, pages)
+        out = out.float()
         ctx.save_for_backward(uv, *pages)
         ctx.mark_non_differentiable(mask)
         ctx.saved_misc = mask, filter_mode, filter_mode_enum, boundary_mode_enum, texture_depth, texture_height, texture_width, texture_channels, page_size_x, page_size_y
@@ -960,22 +958,15 @@ def virtual_texture(texture_depth, texture_height, texture_width, texture_channe
                                            page_size_x, page_size_y, *pages[0])
 
 @torch.no_grad()
-def virtual_texture_construct_mip(texture_depth, texture_height, texture_width, texture_channels, pages: list[torch.Tensor], page_size_x=512, page_size_y=512, max_mip_level=None, use_cuda=False):
-    # If use_cuda is False, pages must have data type float32 and reside in CPU memory.
-    # If use_cuda is True, pages must reside in GPU memory, but can have data type float16 or float32.
+def virtual_texture_construct_mip(texture_depth, texture_height, texture_width, texture_channels, pages: list[torch.Tensor], page_size_x=512, page_size_y=512, max_mip_level=None):
     if max_mip_level is None:
         max_mip_level = -1
     else:
         max_mip_level = int(max_mip_level)
         assert max_mip_level >= 0
-    if use_cuda:
-        return _get_plugin().virtual_texture_construct_mip_cuda(max_mip_level, 
-                                                       texture_depth, texture_height, texture_width, texture_channels, 
-                                                       page_size_x, page_size_y, pages)
-    else:
-        return _get_plugin().virtual_texture_construct_mip(max_mip_level, 
-                                                       texture_depth, texture_height, texture_width, texture_channels, 
-                                                       page_size_x, page_size_y, pages)
+    return _get_plugin().virtual_texture_construct_mip(max_mip_level, 
+                                                    texture_depth, texture_height, texture_width, texture_channels, 
+                                                    page_size_x, page_size_y, pages)
 
 #----------------------------------------------------------------------------
 # Virtual Geometry Operations.

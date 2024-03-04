@@ -795,10 +795,10 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
         return;
 
     // Early exit if output gradients are zero.
-    const T* pDy = (const T*)p.dy + pidx * p.channels;
+    const float* pDy = p.dy + pidx * p.channels;
     unsigned int dmax = 0u;
     for (int i=0; i < p.channels; i++)
-        dmax |= __float_as_uint(cast<float>(pDy[i]));
+        dmax |= __float_as_uint(pDy[i]);
 
     // Store zeros and exit.
     if (__uint_as_float(dmax) == 0.f)
@@ -849,15 +849,12 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
             return; // Outside texture.
 
         tc *= p.channels;
-        T* pOut = (T*)p.gradTex[0][page_index];
+        float* pOut = p.gradTex[0][page_index];
 
         // Accumulate texture gradients.
         for (int i=0; i < p.channels; i++)
         {
-            if constexpr (std::is_same_v<T, float>)
-                caAtomicAddTexture(pOut, 0, tc + i, pDy[i]);
-            else
-                atomicAdd(pOut + tc + i, pDy[i]);
+            caAtomicAddTexture(pOut, 0, tc + i, pDy[i]);
         }
 
         return; // Exit.
@@ -880,7 +877,7 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
     int4 pi0 = make_int4(0, 0, 0, 0);
     float2 uv0 = indexTextureLinear_vt(p, uv, pi0, tc0, level0);
     const T** pIn0 = (const T**)p.tex[level0];
-    T** pOut0 = (T**)p.gradTex[level0];
+    float** pOut0 = p.gradTex[level0];
     // bool corner0 = CUBE_MODE && ((tc0.x | tc0.y | tc0.z | tc0.w) < 0);
     tc0 *= p.channels;
 
@@ -901,7 +898,7 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
     {
         for (int i=0; i < p.channels; i++, tc0 += 1)
         {
-            float dy = cast<float>(pDy[i]);
+            float dy = pDy[i];
             accumQuad_vt(tw0 * dy, pOut0, level0, pi0, tc0, CA_TEMP);
 
             float a00, a10, a01, a11;
@@ -935,7 +932,7 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
     int4 pi1 = make_int4(0, 0, 0, 0);
     float2 uv1 = indexTextureLinear_vt(p, uv, pi1, tc1, level1);
     const T** pIn1 = (const T**)p.tex[level1];
-    T** pOut1 = (T**)p.gradTex[level1];
+    float** pOut1 = p.gradTex[level1];
     // bool corner1 = CUBE_MODE && ((tc1.x | tc1.y | tc1.z | tc1.w) < 0);
     tc1 *= p.channels;
 
@@ -954,7 +951,7 @@ static __forceinline__ __device__ void VirtualTextureGradKernelTemplate(const Vi
     // Trilinear mode.
     for (int i=0; i < p.channels; i++, tc0 += 1, tc1 += 1)
     {
-        float dy = cast<float>(pDy[i]);
+        float dy = pDy[i];
         float dy0 = (1.f - flevel) * dy;
         accumQuad_vt(tw0 * dy0, pOut0, level0, pi0, tc0, CA_TEMP);
 

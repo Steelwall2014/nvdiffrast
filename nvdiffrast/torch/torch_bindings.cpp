@@ -54,7 +54,6 @@ OP_RETURN_VT        virtual_texture_grad_linear         (torch::Tensor uv, torch
 OP_RETURN_WT        virtual_texture_grad_linear_mipmap_nearest  (torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
 OP_RETURN_WTTT      virtual_texture_grad_linear_mipmap_linear   (torch::Tensor uv, torch::Tensor dy, torch::Tensor uv_da, torch::Tensor mip_level_bias, torch::Tensor mask, int filter_mode, int boundary_mode, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<std::vector<torch::Tensor>> pages);
 OP_RETURN_W         virtual_texture_construct_mip               (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
-OP_RETURN_W         virtual_texture_construct_mip_cuda          (int max_mip_level, int texture_depth, int texture_height, int texture_width, int texture_channels, int page_size_x, int page_size_y, std::vector<torch::Tensor> pages);
 torch::Tensor       virtual_geometry_frustum_cull               (torch::Tensor AABBs, torch::Tensor Frustums);
 void                virtual_geometry_vertex_all_reduce          (std::vector<torch::Tensor> cluster_vertices, torch::Tensor shared_verts, torch::Tensor shared_verts_offsets, int reduce_op);
 VirtualGeometryConstructResult virtual_geometry_construct       (torch::Tensor Positions, torch::Tensor Indices, int MaxPartitionSize, std::vector<torch::Tensor> Attributes, torch::Device Device);
@@ -106,7 +105,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("virtual_texture_grad_linear_mipmap_nearest", &virtual_texture_grad_linear_mipmap_nearest,    "virtual texture gradient op in linear-mipmap-nearest mode");
     m.def("virtual_texture_grad_linear_mipmap_linear",  &virtual_texture_grad_linear_mipmap_linear,     "virtual texture gradient op in linear-mipmap-linear mode");
     m.def("virtual_texture_construct_mip",              &virtual_texture_construct_mip,     "virtual texture mipmap construction");
-    m.def("virtual_texture_construct_mip_cuda",         &virtual_texture_construct_mip_cuda,"virtual texture mipmap construction");
     m.def("virtual_geometry_construct",                 &virtual_geometry_construct,        "virtual geometry construction");
     m.def("virtual_geometry_frustum_cull",              &virtual_geometry_frustum_cull,     "virtual geometry frustum cull");
     m.def("virtual_geometry_vertex_all_reduce",         &virtual_geometry_vertex_all_reduce,  "virtual geometry vertex all reduce");
